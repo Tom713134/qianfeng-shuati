@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>前锋刷题软件</title>
+  <meta name="description" content="前锋刷题软件：解压即用的 Windows 选择题练习。导入 JSON / Markdown，错题本，可打乱选项。不用注册，数据只在本机。" />
+  <meta property="og:title" content="前锋刷题软件 / Qianfeng Shuati" />
+  <meta property="og:description" content="解压即用的 Windows 选择题练习。不用注册，数据只在本机。" />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="docs/social-preview.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="theme-color" content="#1a2420" />
+  <link rel="icon" href="前锋刷题.ico" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar" aria-label="题库"></aside>
+    <main id="stage"></main>
+  </div>
+  <div id="scrim" class="scrim"></div>
+  <div id="dropmask" class="dropmask">松开即可导入题库</div>
+  <div id="toast" class="toast" role="status"></div>
+  <div id="live" class="sr" aria-live="polite"></div>
+  <input id="fileInput" type="file" hidden accept=".json,.txt,.md,.csv,.tsv,text/plain,text/markdown,application/json" multiple />
+
+  <dialog id="importDialog" aria-labelledby="importTitle">
+    <form class="dialog-body" method="dialog">
+      <div class="dialog-head">
+        <h2 id="importTitle">导入题库</h2>
+        <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
+      </div>
+      <p class="muted">支持 JSON、CSV、Markdown 和文本。导入后保存在这台电脑的浏览器里。</p>
+      <textarea id="pasteArea" spellcheck="false" placeholder="把题目粘贴到这里，或选择文件"></textarea>
+      <details>
+        <summary>查看格式说明</summary>
+        <div class="help">
+          <p>JSON：每题包含 question、options、answer、explanation。多选答案写成 BD。</p>
+          <pre>{
+  "name": "我的题库",
+  "questions": [
+    {
+      "question": "题干",
+      "options": ["选项一", "选项二", "选项三", "选项四"],
+      "answer": "B",
+      "explanation": "解析"
+    }
+  ]
+}</pre>
+          <p>文本或 Markdown：题目用 1. 2. 编号，或题目之间空一行。选项写成 A. / A)；答案写成 答案：B 或 **Answer: B**，写在选项后面同一行也可以。</p>
+          <pre>1. 题干
+A. 选项
+B. 选项
+**Answer: A**
+解析：说明</pre>
+          <p>CSV 第一行表头：question,A,B,C,D,answer,explanation</p>
+        </div>
+      </details>
+      <p id="importError" class="form-error"></p>
+      <div class="dialog-foot">
+        <button type="button" class="ghost" id="fillSample">填入示例</button>
+        <button type="button" class="ghost" id="chooseFile">选择文件</button>
+        <button type="button" class="primary" id="doImport">导入</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="apiDialog" aria-labelledby="apiTitle">
+    <form class="dialog-body" method="dialog">
+      <div class="dialog-head">
+        <h2 id="apiTitle">API 设置</h2>
+        <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
+      </div>
+      <p class="muted">Key 只保存在这台电脑的浏览器里，不会随题库导出。兼容 OpenAI 格式的接口都可以用。</p>
+      <div class="preset-row">
+        <button type="button" class="ghost" data-action="api-preset" data-base="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</button>
+        <button type="button" class="ghost" data-action="api-preset" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</button>
+        <button type="button" class="ghost" data-action="api-preset" data-base="http://127.0.0.1:11434/v1" data-model="llama3.1">Ollama</button>
+      </div>
+      <label class="field">接口地址
+        <input id="apiBaseInput" type="url" spellcheck="false" placeholder="https://api.deepseek.com/v1" autocomplete="off" />
+      </label>
+      <label class="field">模型
+        <input id="apiModelInput" type="text" spellcheck="false" placeholder="deepseek-chat" autocomplete="off" />
+      </label>
+      <label class="field">API Key
+        <input id="apiKeyInput" type="password" spellcheck="false" placeholder="sk-…" autocomplete="off" />
+      </label>
+      <p id="apiError" class="form-error"></p>
+      <div class="dialog-foot">
+        <button type="button" class="ghost" id="clearApi">清除 Key</button>
+        <button type="button" class="primary" id="saveApi">保存</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="app.js"></script>
+</body>
+</html>

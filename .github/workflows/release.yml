@@ -1,0 +1,25 @@
+name: Release zip
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pack portable folder
+        run: |
+          mkdir qianfeng-shuati
+          cp index.html app.js styles.css server.ps1 \
+            打开前锋刷题.vbs 前锋刷题.bat 前锋刷题.ico 怎么用.html LICENSE README.md qianfeng-shuati/
+          cp -r 题库 qianfeng-shuati/题库
+          zip -r qianfeng-shuati-windows.zip qianfeng-shuati
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: qianfeng-shuati-windows.zip
+          generate_release_notes: true

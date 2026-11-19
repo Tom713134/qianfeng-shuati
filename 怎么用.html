@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>怎么用 · 前锋刷题软件</title>
+  <link rel="icon" href="前锋刷题.ico" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #ebe4d8;
+      color: #1c1915;
+      line-height: 1.6;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }
+    header {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    header img {
+      width: 72px;
+      height: 72px;
+      border-radius: 18px;
+      background: #1a2420;
+    }
+    h1 { margin: 0; font-size: 1.6rem; }
+    header p { margin: 4px 0 0; color: #6f675c; }
+    section {
+      background: #fbf7f1;
+      border-radius: 16px;
+      padding: 18px 20px 16px;
+      margin-bottom: 14px;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+      color: #0f6e62;
+    }
+    ol, ul { margin: 0; padding-left: 1.2em; }
+    li { margin: 6px 0; }
+    kbd, .file {
+      display: inline-block;
+      background: #efe8dc;
+      border-radius: 6px;
+      padding: 0 6px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.95em;
+    }
+    .warn {
+      background: #fdeceb;
+      color: #8f1d18;
+    }
+    .ok {
+      background: #e7f6ee;
+      color: #146239;
+    }
+    .shot {
+      margin-top: 12px;
+      background: #1a2420;
+      color: #f4efe6;
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 14px;
+    }
+    .shot strong { color: #e0b15a; }
+    .shot span { color: rgba(255,255,255,.62); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="前锋刷题.ico" alt="前锋刷题软件" />
+      <div>
+        <h1>前锋刷题软件</h1>
+        <p>解压后整份文件夹留下，双击即可做题。不用安装，不用注册。</p>
+      </div>
+    </header>
+
+    <section>
+      <h2>网页试用</h2>
+      <ol>
+        <li>打开 GitHub 仓库 About 里的 Website（GitHub Pages），浏览器里即可刷示例题。</li>
+        <li>网页版进度只存在当前浏览器。要导入自己的试卷，请用下面的 Windows 打开方式。</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>怎么打开</h2>
+      <ol>
+        <li>从 GitHub 下载 zip 或克隆本仓库，把整个文件夹放到电脑里，不要只拷其中一个文件。</li>
+        <li>双击带图标的 <span class="file">前锋刷题</span>（快捷方式）。没有图标时，双击 <span class="file">打开前锋刷题.vbs</span> 或 <span class="file">前锋刷题.bat</span>。</li>
+        <li>第一次会弹出独立窗口。关掉窗口即退出，不必关后台。</li>
+      </ol>
+      <div class="shot">
+        <strong>前锋刷题软件</strong><br />
+        <span>选择题练习 · 进度保存在这台电脑</span>
+      </div>
+    </section>
+
+    <section class="warn">
+      <h2>Windows 提示「已保护你的电脑」时</h2>
+      <ol>
+        <li>点「更多信息」，再点「仍要运行」。</li>
+        <li>或者：右键 <span class="file">打开前锋刷题.vbs</span> / <span class="file">前锋刷题.bat</span> → 属性 → 勾选「解除锁定」→ 确定。</li>
+        <li>从 QQ / 微信 / 网盘下载的压缩包常会带这个标记，解压后按上面做一次即可。</li>
+      </ol>
+    </section>
+
+    <section class="ok">
+      <h2>进度会保留</h2>
+      <ul>
+        <li>做题记录、导入的题库、API Key 都存在这台电脑上，<strong>下次打开还在</strong>。</li>
+        <li>不要删除 <span class="file">%APPDATA%\前锋刷题软件</span>，也不要清除「前锋刷题软件」窗口里的网站数据。</li>
+        <li>换电脑时：把整个文件夹拷走，并在本软件里先「导出题库」。进度目前跟这台电脑绑定。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>试试示例题</h2>
+      <ol>
+        <li>侧边栏「导入题库」，拖入 <span class="file">题库/sample-questions.json</span> 或 <span class="file">题库/sample-questions.txt</span>。</li>
+        <li>也可导入自己的 JSON、Markdown、CSV 或文本。课内试卷请留在本机，不要提交到仓库。</li>
+        <li>可打乱题序、打乱选项；做错的题用「只看错题」。</li>
+        <li>有自己的 API Key 时，可在「API 设置」里填写，答完题后生成解析。不填也能刷题。</li>
+      </ol>
+    </section>
+  </div>
+</body>
+</html>
