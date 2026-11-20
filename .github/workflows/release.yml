@@ -16,8 +16,9 @@ jobs:
         run: |
           mkdir qianfeng-shuati
           cp index.html app.js styles.css server.ps1 \
-            打开前锋刷题.vbs 前锋刷题.bat 前锋刷题.ico 怎么用.html LICENSE README.md qianfeng-shuati/
-          cp -r 题库 qianfeng-shuati/题库
+            start.bat open.vbs app.ico how-to.html LICENSE README.md qianfeng-shuati/
+          cp -r questions qianfeng-shuati/questions
+          cp -r sponsor qianfeng-shuati/sponsor
           zip -r qianfeng-shuati-windows.zip qianfeng-shuati
       - uses: softprops/action-gh-release@v2
         with:

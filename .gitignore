@@ -16,11 +16,9 @@ ehthumbs.db
 *.apk
 *.zip
 手机/
-打开刷题.vbs
-刷题.bat
 
-# 题库 only ships the two sample files
-题库/*
-!题库/README.md
-!题库/sample-questions.json
-!题库/sample-questions.txt
+# questions/ only ships the sample files
+questions/*
+!questions/README.md
+!questions/sample-questions.json
+!questions/sample-questions.txt

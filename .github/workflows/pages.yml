@@ -25,9 +25,10 @@ jobs:
       - name: Prepare site
         run: |
           mkdir _site
-          cp index.html app.js styles.css 怎么用.html 前锋刷题.ico LICENSE _site/
-          cp -r 题库 _site/题库
+          cp index.html app.js styles.css how-to.html app.ico LICENSE _site/
+          cp -r questions _site/questions
           cp -r docs _site/docs
+          cp -r sponsor _site/sponsor
           touch _site/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:

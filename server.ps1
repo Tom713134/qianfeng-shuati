@@ -1,23 +1,31 @@
-﻿# 本地打开前锋刷题软件。浏览器窗口关闭后，本终端立即退出。
-# 进度存在固定浏览器配置里（%APPDATA%\前锋刷题软件），端口固定，下次打开还在。
+﻿# Open Qianfeng Shuati locally. Exit when the browser window closes.
+# Progress lives in %APPDATA%\QianfengShuati (migrated from older Chinese folder names).
 param([switch]$NoBrowser)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $port = 17831
-$dataRoot = Join-Path $env:APPDATA "前锋刷题软件"
-$legacyRoot = Join-Path $env:APPDATA "刷题"
-if ((Test-Path -LiteralPath $legacyRoot) -and -not (Test-Path -LiteralPath $dataRoot)) {
-  Move-Item -LiteralPath $legacyRoot -Destination $dataRoot
+$dataRoot = Join-Path $env:APPDATA "QianfengShuati"
+$legacyRoots = @(
+  (Join-Path $env:APPDATA "前锋刷题软件"),
+  (Join-Path $env:APPDATA "刷题")
+)
+foreach ($legacyRoot in $legacyRoots) {
+  if ((Test-Path -LiteralPath $legacyRoot) -and -not (Test-Path -LiteralPath $dataRoot)) {
+    Move-Item -LiteralPath $legacyRoot -Destination $dataRoot
+    break
+  }
 }
 $profile = Join-Path $dataRoot "profile"
-$marker = "前锋刷题软件\profile"
+$marker = "QianfengShuati\profile"
 $allowed = @{
-  "index.html"     = "text/html; charset=utf-8"
-  "app.js"         = "text/javascript; charset=utf-8"
-  "styles.css"     = "text/css; charset=utf-8"
-  "前锋刷题.ico"   = "image/x-icon"
-  "刷题.ico"       = "image/x-icon"
+  "index.html"         = "text/html; charset=utf-8"
+  "app.js"             = "text/javascript; charset=utf-8"
+  "styles.css"         = "text/css; charset=utf-8"
+  "how-to.html"        = "text/html; charset=utf-8"
+  "app.ico"            = "image/x-icon"
+  "sponsor\wechat.png" = "image/png"
+  "sponsor\alipay.png" = "image/png"
 }
 
 try {
@@ -57,6 +65,7 @@ function Get-QuizBrowser {
       $_.CommandLine -and (
         $_.CommandLine.Contains($profile) -or
         $_.CommandLine.Contains($marker) -or
+        $_.CommandLine.Contains("前锋刷题软件\profile") -or
         $_.CommandLine.Contains("刷题\profile")
       )
     }
@@ -91,10 +100,8 @@ function Test-OurServer {
 }
 
 function Ensure-LaunchShortcut {
-  $vbs = Join-Path $root "打开前锋刷题.vbs"
-  if (-not (Test-Path -LiteralPath $vbs)) { $vbs = Join-Path $root "打开刷题.vbs" }
-  $ico = Join-Path $root "前锋刷题.ico"
-  if (-not (Test-Path -LiteralPath $ico)) { $ico = Join-Path $root "刷题.ico" }
+  $vbs = Join-Path $root "open.vbs"
+  $ico = Join-Path $root "app.ico"
   $lnkPath = Join-Path $root "前锋刷题.lnk"
   if (-not (Test-Path -LiteralPath $vbs)) { return }
   $wsh = New-Object -ComObject WScript.Shell
@@ -252,7 +259,7 @@ if (-not $started) {
     if (-not $NoBrowser) { Open-QuizWindow $prefix | Out-Null }
     exit 0
   }
-  Show-Error "端口 $port 已被其他程序占用。关掉占用该端口的程序后，再双击打开前锋刷题软件。"
+  Show-Error "端口 $port 已被其他程序占用。关掉占用该端口的程序后，再双击 start.bat 或「前锋刷题」快捷方式。"
   exit 1
 }
 
@@ -295,9 +302,13 @@ try {
     }
 
     $name = if ($rawPath -eq "/") { "index.html" } else { $rawPath.TrimStart("/") -replace "/", "\" }
-    $leaf = Split-Path -Leaf $name
-    $file = Join-Path $root $leaf
-    if ($name -ne $leaf -or -not $allowed.ContainsKey($leaf) -or -not (Test-Path -LiteralPath $file)) {
+    if ($name.Contains("..") -or -not $allowed.ContainsKey($name)) {
+      $missing = [Text.Encoding]::UTF8.GetBytes("not found")
+      Write-Response $context 404 $missing "text/plain; charset=utf-8"
+      continue
+    }
+    $file = Join-Path $root $name
+    if (-not (Test-Path -LiteralPath $file)) {
       $missing = [Text.Encoding]::UTF8.GetBytes("not found")
       Write-Response $context 404 $missing "text/plain; charset=utf-8"
       continue
@@ -305,7 +316,7 @@ try {
 
     $script:lastSeen = Get-Date
     $bytes = [System.IO.File]::ReadAllBytes($file)
-    Write-Response $context 200 $bytes $allowed[$leaf]
+    Write-Response $context 200 $bytes $allowed[$name]
   }
 }
 finally {

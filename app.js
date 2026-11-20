@@ -104,6 +104,10 @@ let examTimer = 0;
 let dragDepth = 0;
 let explainingId = "";
 let ctxScoreId = null;
+let editQuestionId = null;
+let bankSettingsTab = "import";
+let settingsSection = "";
+let sponsorMethod = "wechat";
 
 function fresh() {
   return {
@@ -967,19 +971,16 @@ function buildExplainMessages(question) {
   ];
 }
 
-function openApiSettings() {
+function fillApiForm() {
   const settings = loadApiSettings();
   $("apiError").textContent = "";
   $("apiBaseInput").value = settings.baseUrl;
   $("apiModelInput").value = settings.model;
   $("apiKeyInput").value = settings.apiKey;
-  $("apiDialog").showModal();
-  $("apiKeyInput").focus();
 }
 
-function closeApiSettings() {
-  if ($("apiDialog").open) $("apiDialog").close();
-  $("apiError").textContent = "";
+function openApiSettings() {
+  openSettings({ section: "api" });
 }
 
 function applyApiPreset(base, model) {
@@ -1008,7 +1009,6 @@ function saveApiFromForm() {
     return;
   }
   saveApiSettings({ apiKey, baseUrl, model });
-  closeApiSettings();
   toast(apiKey ? "API 设置已保存" : "已保存接口，未填写 Key（本地模型可用）");
 }
 
@@ -1070,7 +1070,7 @@ async function generateExplain() {
   } catch (err) {
     const message = String(err.message || "生成失败");
     if (/failed to fetch|networkerror|load failed/i.test(message)) {
-      toast("连不上接口。用前锋刷题.bat 打开，或检查地址、跨域和网络。");
+      toast("连不上接口。用 start.bat 打开，或检查地址、跨域和网络。");
     } else {
       toast(message);
     }
@@ -1252,8 +1252,8 @@ function bankOptionsShuffled(bank) {
   return Boolean(map && Object.keys(map).length);
 }
 
-function uniqueName(name) {
-  const names = new Set(state.banks.map((bank) => bank.name));
+function uniqueName(name, exceptId) {
+  const names = new Set(state.banks.filter((bank) => exceptId == null || bank.id !== exceptId).map((bank) => bank.name));
   if (!names.has(name)) return name;
   let index = 2;
   while (names.has(`${name} (${index})`)) index += 1;
@@ -1779,6 +1779,7 @@ function go(delta) {
 }
 
 function jumpTo(id) {
+  state.panel = null;
   state.pinId = null;
   state.currentId = id;
   const question = currentQuestion();
@@ -2020,12 +2021,12 @@ function buildExportPayload(options) {
   }
   if (!extra && options.banks && options.scope === "all") {
     return {
-      filename: "前锋刷题-题库.json",
+      filename: "qianfeng-shuati-banks.json",
       data: banks.map(publicBank),
     };
   }
   return {
-    filename: options.banks && extra ? "前锋刷题-备份.json" : "前锋刷题-进度.json",
+    filename: options.banks && extra ? "qianfeng-shuati-backup.json" : "qianfeng-shuati-progress.json",
     data: {
       kind: BACKUP_KIND,
       version: 1,
@@ -2225,7 +2226,75 @@ function openArchivedExam(id) {
   render({ toTop: true });
 }
 
-function openExportDialog() {
+function applySettingsVisibility() {
+  document.querySelectorAll("#bankSettings [data-settings-section]").forEach((node) => {
+    const on = node.dataset.settingsSection === settingsSection;
+    const head = node.querySelector(".settings-fold-head");
+    const body = node.querySelector(".settings-fold-body");
+    if (head) head.setAttribute("aria-expanded", on ? "true" : "false");
+    if (body) body.hidden = !on;
+  });
+}
+
+function fillOpenSettings() {
+  if (settingsSection === "api") {
+    fillApiForm();
+    return;
+  }
+  if (settingsSection === "sponsor") {
+    syncSponsorPanel();
+    return;
+  }
+  if (settingsSection !== "bank") return;
+  fillExportPanel();
+  fillBankManage();
+  fillBankEditor(editQuestionId || state.currentId);
+}
+
+function syncSponsorPanel() {
+  document.querySelectorAll("[data-action='sponsor-method']").forEach((node) => {
+    node.setAttribute("aria-pressed", node.dataset.method === sponsorMethod ? "true" : "false");
+  });
+  const qr = $("sponsorQr");
+  if (qr) {
+    const src = sponsorMethod === "alipay" ? "sponsor/alipay.png" : "sponsor/wechat.png";
+    if (qr.getAttribute("src") !== src) qr.src = src;
+    qr.alt = sponsorMethod === "alipay" ? "支付宝收款码" : "微信收款码";
+  }
+  const hint = $("sponsorHint");
+  if (hint) {
+    const pay = sponsorMethod === "alipay" ? "支付宝" : "微信";
+    hint.textContent = `请使用${pay}扫码赞助`;
+  }
+}
+
+function setSponsorMethod(method) {
+  if (method !== "wechat" && method !== "alipay") return;
+  sponsorMethod = method;
+  syncSponsorPanel();
+}
+
+function showSettingsSection(section, options = {}) {
+  const next = section === "api" || section === "bank" || section === "sponsor" ? section : "";
+  if (options.toggle !== false && next && settingsSection === next) settingsSection = "";
+  else settingsSection = next;
+  applySettingsVisibility();
+  fillOpenSettings();
+  if (options.focus === false) return;
+  if (settingsSection === "api") $("apiKeyInput")?.focus();
+  else if (settingsSection === "bank") {
+    const panel = document.querySelector(`#bankSettings [data-bank-panel="${bankSettingsTab}"]`);
+    panel?.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function showBankTab(tab) {
+  if (tab === "manage") tab = "edit";
+  bankSettingsTab = ["import", "export", "edit"].includes(tab) ? tab : "import";
+  showSettingsSection("bank", { toggle: false });
+}
+
+function fillExportPanel() {
   $("exportError").textContent = "";
   const picker = canPickSavePath();
   $("exportWherePicker").disabled = !picker;
@@ -2236,7 +2305,252 @@ function openExportDialog() {
     const download = document.querySelector('input[name="exportWhere"][value="download"]');
     if (download) download.checked = true;
   }
-  $("exportDialog").showModal();
+}
+
+function fillBankManage() {
+  const bank = getBank();
+  $("manageError").textContent = "";
+  $("bankNameInput").disabled = !bank;
+  $("saveBankName").disabled = !bank;
+  $("duplicateBank").disabled = !bank;
+  $("deleteBankBtn").disabled = !bank;
+  if (!bank) {
+    $("bankNameInput").value = "";
+    $("manageHint").textContent = "还没有题库。先到「导入」添加，或在侧边栏载入示例。";
+    $("manageMeta").textContent = "";
+    return;
+  }
+  const stats = bankStats(bank);
+  $("bankNameInput").value = bank.name;
+  $("manageHint").textContent = "改名、复制、增删改题目都在这一页。";
+  $("manageMeta").textContent = `${stats.total} 题 · 已做 ${stats.correct + stats.wrong} · 正确 ${stats.correct} · 错误 ${stats.wrong}`;
+}
+
+function fillBankEditor(questionId) {
+  const bank = getBank();
+  $("editError").textContent = "";
+  const select = $("editQuestionSelect");
+  if (!bank || !bank.questions.length) {
+    select.innerHTML = '<option value="">还没有题目</option>';
+    $("editStem").value = "";
+    $("editOptions").value = "";
+    $("editAnswer").value = "";
+    $("editExplain").value = "";
+    $("editType").value = "single";
+    editQuestionId = null;
+    $("saveQuestionBtn").disabled = true;
+    $("deleteQuestionBtn").disabled = true;
+    $("addQuestionBtn").disabled = !bank;
+    $("moveQuestionUp").disabled = true;
+    $("moveQuestionDown").disabled = true;
+    return;
+  }
+  $("addQuestionBtn").disabled = false;
+  $("saveQuestionBtn").disabled = false;
+  $("deleteQuestionBtn").disabled = false;
+  const question = bank.questions.find((item) => item.id === questionId) || bank.questions[0];
+  editQuestionId = question.id;
+  select.innerHTML = bank.questions.map((item, index) =>
+    `<option value="${esc(item.id)}"${item.id === question.id ? " selected" : ""}>${index + 1}. ${esc(item.stem.slice(0, 42) || "未命名")}</option>`
+  ).join("");
+  $("editStem").value = question.stem || "";
+  $("editType").value = question.type === "multiple" ? "multiple" : "single";
+  $("editOptions").value = (question.options || []).map((option) => option.text).join("\n");
+  $("editAnswer").value = (question.answer || []).join("");
+  $("editExplain").value = question.explanation || "";
+  const index = bank.questions.findIndex((item) => item.id === question.id);
+  $("moveQuestionUp").disabled = index <= 0;
+  $("moveQuestionDown").disabled = index < 0 || index >= bank.questions.length - 1;
+}
+
+function syncNavHighlight() {
+  document.querySelectorAll(".sidebar [data-action='open-settings']").forEach((node) => {
+    node.setAttribute("aria-pressed", state.panel === "settings" ? "true" : "false");
+  });
+}
+
+function openSettings(options = {}) {
+  const tab = options.tab;
+  let section = "";
+  if (options.section === "api" || tab === "api") section = "api";
+  else if (options.section === "sponsor" || tab === "sponsor") section = "sponsor";
+  else if (options.section === "bank" || (tab && tab !== "api" && tab !== "sponsor")) section = "bank";
+  if (section !== "api" && section !== "sponsor" && tab !== "export" && !confirmLeaveExam()) return;
+  state.panel = "settings";
+  settingsSection = section;
+  if (section === "bank" && tab && tab !== "api" && tab !== "sponsor") {
+    bankSettingsTab = tab === "manage" ? "edit" : tab;
+  }
+  $("importError").textContent = "";
+  $("exportError").textContent = "";
+  save();
+  render({ toTop: true });
+  showSettingsSection(settingsSection, { toggle: false });
+  closeSidebar();
+}
+
+function openBankSettings(tab) {
+  if (tab === "api") openSettings({ section: "api" });
+  else if (tab === "sponsor") openSettings({ section: "sponsor" });
+  else if (tab) openSettings({ section: "bank", tab });
+  else openSettings();
+}
+
+function closeBankSettings() {
+  state.panel = null;
+  save();
+  render({ toTop: true });
+}
+
+function syncSettingsView() {
+  const on = state.panel === "settings";
+  const page = $("bankSettings");
+  const stage = $("stage");
+  if (page) page.hidden = !on;
+  if (stage) stage.hidden = on;
+  if (on) applySettingsVisibility();
+}
+
+function openExportDialog() {
+  openBankSettings("export");
+}
+
+function renameCurrentBank() {
+  const bank = getBank();
+  if (!bank) return;
+  const name = $("bankNameInput").value.trim();
+  if (!name) {
+    $("manageError").textContent = "请填写题库名称";
+    return;
+  }
+  bank.name = uniqueName(name, bank.id);
+  $("bankNameInput").value = bank.name;
+  $("manageError").textContent = "";
+  save();
+  render();
+  fillBankManage();
+  toast("题库名称已保存");
+}
+
+function duplicateBank() {
+  const bank = getBank();
+  if (!bank) return;
+  const copy = {
+    id: uid(),
+    name: uniqueName(`${bank.name} 副本`),
+    createdAt: Date.now(),
+    questions: bank.questions.map((question) => ({
+      id: uid(),
+      stem: question.stem,
+      options: (question.options || []).map((option) => ({ key: option.key, text: option.text })),
+      answer: [...(question.answer || [])],
+      explanation: question.explanation || "",
+      type: question.type,
+    })),
+  };
+  state.banks.push(copy);
+  state.activeBankId = copy.id;
+  state.currentId = copy.questions[0]?.id || null;
+  save();
+  render();
+  fillBankManage();
+  fillBankEditor(state.currentId);
+  toast(`已复制为「${copy.name}」`);
+}
+
+function saveEditedQuestion() {
+  const bank = getBank();
+  if (!bank) {
+    $("editError").textContent = "请先导入或选择题库";
+    return;
+  }
+  const lines = $("editOptions").value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const options = lines.map((text, index) => ({ key: LETTERS[index] || String(index + 1), text }));
+  const result = finalizeQuestion({
+    stem: $("editStem").value,
+    options,
+    answer: $("editAnswer").value,
+    explanation: $("editExplain").value,
+    type: $("editType").value,
+  });
+  if (result.error) {
+    $("editError").textContent = result.error;
+    return;
+  }
+  const next = result.question;
+  const existing = bank.questions.find((item) => item.id === editQuestionId);
+  if (existing) {
+    existing.stem = next.stem;
+    existing.options = next.options;
+    existing.answer = next.answer;
+    existing.explanation = next.explanation;
+    existing.type = next.type;
+  } else {
+    bank.questions.push(next);
+    editQuestionId = next.id;
+  }
+  if (state.optionOrder[bank.id]) delete state.optionOrder[bank.id][existing ? existing.id : next.id];
+  save();
+  render();
+  fillBankEditor(editQuestionId);
+  toast("题目已保存");
+}
+
+function addBlankQuestion() {
+  const bank = getBank();
+  if (!bank) {
+    $("editError").textContent = "请先导入或选择题库";
+    return;
+  }
+  const result = finalizeQuestion({
+    stem: "新题目",
+    options: [{ key: "A", text: "选项一" }, { key: "B", text: "选项二" }],
+    answer: "A",
+    explanation: "",
+    type: "single",
+  });
+  bank.questions.push(result.question);
+  state.currentId = result.question.id;
+  save();
+  render();
+  fillBankEditor(result.question.id);
+  $("editStem").focus();
+  $("editStem").select();
+}
+
+function deleteEditedQuestion() {
+  const bank = getBank();
+  if (!bank || !editQuestionId) return;
+  if (bank.questions.length <= 1) {
+    $("editError").textContent = "至少保留一题。要去掉整套请点「删除本题库」。";
+    return;
+  }
+  if (!confirm("删除这道题？做题记录和收藏也会去掉。")) return;
+  const id = editQuestionId;
+  bank.questions = bank.questions.filter((item) => item.id !== id);
+  if (state.records[bank.id]) delete state.records[bank.id][id];
+  if (state.flags.star?.[bank.id]) delete state.flags.star[bank.id][id];
+  if (state.optionOrder[bank.id]) delete state.optionOrder[bank.id][id];
+  if (state.order[bank.id]) state.order[bank.id] = state.order[bank.id].filter((qid) => qid !== id);
+  state.currentId = bank.questions[0]?.id || null;
+  save();
+  render();
+  fillBankEditor(state.currentId);
+  toast("题目已删除");
+}
+
+function moveEditedQuestion(delta) {
+  const bank = getBank();
+  if (!bank || !editQuestionId) return;
+  const index = bank.questions.findIndex((item) => item.id === editQuestionId);
+  const next = index + delta;
+  if (index < 0 || next < 0 || next >= bank.questions.length) return;
+  const [item] = bank.questions.splice(index, 1);
+  bank.questions.splice(next, 0, item);
+  if (state.order[bank.id]) delete state.order[bank.id];
+  save();
+  render();
+  fillBankEditor(item.id);
 }
 
 function syncExportPreset() {
@@ -2257,7 +2571,6 @@ async function confirmExport() {
     });
     const where = document.querySelector('input[name="exportWhere"]:checked')?.value || "download";
     const saved = await writeJsonFile(payload.filename, payload.data, where);
-    if ($("exportDialog").open) $("exportDialog").close();
     toast(saved === "picked" ? "已保存到所选位置" : `已开始下载 ${payload.filename}`);
   } catch (err) {
     if (err && err.name === "AbortError") return;
@@ -2266,21 +2579,22 @@ async function confirmExport() {
 }
 
 function openImport() {
-  $("importError").textContent = "";
-  $("importDialog").showModal();
-  $("pasteArea").focus();
+  openBankSettings("import");
 }
 
 function closeImport() {
-  if ($("importDialog").open) $("importDialog").close();
   $("importError").textContent = "";
+  if ($("pasteArea")) $("pasteArea").value = "";
+  if (state.panel === "settings") {
+    showBankTab(getBank() ? "edit" : "import");
+  }
 }
 
 function render(options = {}) {
   hideCtxMenu();
   const bank = getBank();
   if (bank && bank.id !== state.activeBankId) state.activeBankId = bank.id;
-  const list = bank && state.panel !== "history" ? visibleQuestions() : [];
+  const list = bank && state.panel !== "history" && state.panel !== "settings" ? visibleQuestions() : [];
   if (bank && list.length && !list.some((question) => question.id === state.currentId)) {
     state.currentId = list[0].id;
   }
@@ -2289,6 +2603,8 @@ function render(options = {}) {
     : APP_NAME;
   $("sidebar").innerHTML = renderSidebar(bank);
   $("stage").innerHTML = renderStage(bank, list);
+  syncSettingsView();
+  syncNavHighlight();
   if (options.toTop) window.scrollTo(0, 0);
   if (options.focusVerdict) document.querySelector(".verdict")?.scrollIntoView({ block: "nearest" });
   if (options.keepSearch) {
@@ -2306,7 +2622,7 @@ function renderSidebar(bank) {
     const stats = bankStats(item);
     const done = stats.correct + stats.wrong;
     const rate = done ? ` · 正确率 ${rateOf(stats)}%` : "";
-    return `<button type="button" class="bank${item.id === state.activeBankId ? " active" : ""}" data-action="open-bank" data-id="${esc(item.id)}">
+    return `<button type="button" class="bank${item.id === state.activeBankId && state.panel !== "settings" ? " active" : ""}" data-action="open-bank" data-id="${esc(item.id)}">
       <span class="bank-name">${esc(item.name)}</span>
       <span class="bank-meta">${stats.total} 题${rate}</span>
     </button>`;
@@ -2346,32 +2662,29 @@ function renderSidebar(bank) {
       tools = `<div class="side-actions">
         <button type="button" class="side-btn primary wide" data-action="open-exam">开始考试</button>
         <button type="button" class="side-btn" data-action="open-history">成绩档案</button>
-        <button type="button" class="side-btn" data-action="export">导出</button>
-        <button type="button" class="side-btn wide" data-action="delete">删除本题库</button>
+        <button type="button" class="side-btn" data-action="open-settings" data-tab="export">导出</button>
       </div>`;
     } else {
       const filter = state.filter || "all";
       tools = `<div class="side-actions">
-        <button type="button" class="side-btn" data-action="export">导出</button>
         <button type="button" class="side-btn" data-action="shuffle" aria-pressed="${shuffled}">${shuffled ? "恢复题序" : "打乱题序"}</button>
         <button type="button" class="side-btn" data-action="shuffle-options" aria-pressed="${optionShuffled}">${optionShuffled ? "恢复选项" : "打乱选项"}</button>
         <button type="button" class="side-btn" data-action="clear">清空记录</button>
-        <button type="button" class="side-btn wide" data-action="delete">删除本题库</button>
+        <button type="button" class="side-btn danger" data-action="delete">删除本题库</button>
       </div>
+      <p class="side-label">题目</p>
       <div class="filter-row">
         <button type="button" class="chip" data-action="filter-all" aria-pressed="${filter === "all"}">全部</button>
         <button type="button" class="chip" data-action="filter-wrong" aria-pressed="${filter === "wrong"}">错题</button>
         <button type="button" class="chip" data-action="filter-star" aria-pressed="${filter === "star"}">收藏</button>
       </div>
-      <p class="side-label">题目</p>
       <div class="qgrid">${dots}</div>`;
     }
   }
   const topActions = examActive()
     ? ""
     : `<div class="side-actions">
-      <button type="button" class="side-btn primary wide" data-action="open-import">导入题库</button>
-      <button type="button" class="side-btn wide" data-action="open-api">API 设置</button>
+      <button type="button" class="side-btn wide" data-action="open-settings" aria-pressed="${state.panel === "settings"}">设置</button>
       <button type="button" class="side-btn wide" data-action="load-sample">载入示例题库</button>
     </div>`;
   const modeSwitch = examActive()
@@ -2414,11 +2727,12 @@ function renderHistory(menu) {
 
 function renderStage(bank, list) {
   const menu = '<button type="button" class="menu-btn" data-action="toggle-sidebar">题库</button>';
+  if (state.panel === "settings") return "";
   if (state.panel === "history") return renderHistory(menu);
   if (!bank) {
     return `<div class="sheet"><div class="top">${menu}<div><h2>${isExamMode() ? "考试模式" : "刷题模式"}</h2></div></div>
       <article class="card empty-card"><h1>还没有题目</h1><p>导入 JSON、CSV、Markdown 或文本题库，也可以先载入一套示例题。</p>
-      <div class="nav"><button type="button" class="primary" data-action="open-import">导入题库</button><button type="button" class="ghost" data-action="load-sample">载入示例</button></div></article></div>`;
+      <div class="nav"><button type="button" class="primary" data-action="open-settings" data-tab="import">设置</button><button type="button" class="ghost" data-action="load-sample">载入示例</button></div></article></div>`;
   }
   if (isExamMode() && !examActive()) {
     const recent = (state.examHistory || []).slice(0, 4).map((item) => historyRowHtml(item, true)).join("");
@@ -2587,10 +2901,13 @@ function onClick(event) {
   else if (action === "jump") jumpTo(node.dataset.id);
   else if (action === "redo") redo();
   else if (action === "open-bank") focusBank(node.dataset.id);
-  else if (action === "open-import") {
-    if (!confirmLeaveExam()) return;
-    openImport();
+  else if (action === "open-import" || action === "open-bank-settings" || action === "open-settings") {
+    openBankSettings(node.dataset.tab);
   }
+  else if (action === "settings-section") showSettingsSection(node.dataset.section);
+  else if (action === "sponsor-method") setSponsorMethod(node.dataset.method);
+  else if (action === "bank-tab") showBankTab(node.dataset.tab);
+  else if (action === "close-settings") closeBankSettings();
   else if (action === "open-exam") {
     state.panel = null;
     openExamDialog();
@@ -2646,7 +2963,7 @@ function onClick(event) {
 function onKey(event) {
   if (event.key === "Escape") hideCtxMenu();
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  if ($("importDialog").open || $("apiDialog").open || $("examDialog")?.open || $("exportDialog")?.open) return;
+  if (($("bankSettings") && !$("bankSettings").hidden) || $("examDialog")?.open) return;
   if (event.target.closest("textarea, input")) return;
   const question = currentQuestion();
   if (!question) return;
@@ -2706,6 +3023,22 @@ function bind() {
   window.addEventListener("resize", hideCtxMenu);
   window.addEventListener("scroll", hideCtxMenu, true);
   $("scrim").addEventListener("click", closeSidebar);
+  $("saveBankName").addEventListener("click", renameCurrentBank);
+  $("duplicateBank").addEventListener("click", duplicateBank);
+  $("deleteBankBtn").addEventListener("click", () => {
+    deleteBank();
+    if (state.panel === "settings") {
+      fillBankManage();
+      fillBankEditor(state.currentId);
+      if (!getBank()) showBankTab("import");
+    }
+  });
+  $("editQuestionSelect").addEventListener("change", () => fillBankEditor($("editQuestionSelect").value));
+  $("saveQuestionBtn").addEventListener("click", saveEditedQuestion);
+  $("addQuestionBtn").addEventListener("click", addBlankQuestion);
+  $("deleteQuestionBtn").addEventListener("click", deleteEditedQuestion);
+  $("moveQuestionUp").addEventListener("click", () => moveEditedQuestion(-1));
+  $("moveQuestionDown").addEventListener("click", () => moveEditedQuestion(1));
   $("fillSample").addEventListener("click", () => {
     $("pasteArea").value = TEXT_SAMPLE;
     $("importError").textContent = "";
@@ -2949,8 +3282,8 @@ D. 4
   assert(mdPack.questions[2].type === "multiple" && mdPack.questions[2].answer.join("") === "BD", "Markdown 多选");
 
   const fs = require("fs");
-  const java1Path = fs.existsSync("java1.md") ? "java1.md" : "题库/java1.md";
-  const java2Path = fs.existsSync("java2.md") ? "java2.md" : "题库/java2.md";
+  const java1Path = fs.existsSync("java1.md") ? "java1.md" : "questions/java1.md";
+  const java2Path = fs.existsSync("java2.md") ? "java2.md" : "questions/java2.md";
   if (fs.existsSync(java1Path)) {
     const java1 = parseImport(fs.readFileSync(java1Path, "utf8"), "java1.md")[0];
     assert(java1.questions.length >= 90, "java1 应识别出大部分题目，实际 " + java1.questions.length);

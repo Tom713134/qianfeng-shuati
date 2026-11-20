@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>怎么用 · 前锋刷题软件</title>
-  <link rel="icon" href="前锋刷题.ico" />
+  <link rel="icon" href="app.ico" />
   <style>
     * { box-sizing: border-box; }
     body {
@@ -77,7 +77,7 @@
 <body>
   <div class="wrap">
     <header>
-      <img src="前锋刷题.ico" alt="前锋刷题软件" />
+      <img src="app.ico" alt="前锋刷题软件" />
       <div>
         <h1>前锋刷题软件</h1>
         <p>解压后整份文件夹留下，双击即可做题。不用安装，不用注册。</p>
@@ -85,23 +85,15 @@
     </header>
 
     <section>
-      <h2>网页试用</h2>
-      <ol>
-        <li>打开 GitHub 仓库 About 里的 Website（GitHub Pages），浏览器里即可刷示例题。</li>
-        <li>网页版进度只存在当前浏览器。要导入自己的试卷，请用下面的 Windows 打开方式。</li>
-      </ol>
-    </section>
-
-    <section>
       <h2>怎么打开</h2>
       <ol>
-        <li>从 GitHub 下载 zip 或克隆本仓库，把整个文件夹放到电脑里，不要只拷其中一个文件。</li>
-        <li>双击带图标的 <span class="file">前锋刷题</span>（快捷方式）。没有图标时，双击 <span class="file">打开前锋刷题.vbs</span> 或 <span class="file">前锋刷题.bat</span>。</li>
+        <li>把整个文件夹放到电脑里（桌面或网盘都可以），不要只拷其中一个文件。</li>
+        <li>双击带图标的 <span class="file">前锋刷题</span> 快捷方式。没有时先双击 <span class="file">start.bat</span> 或 <span class="file">open.vbs</span>，会自动生成快捷方式。</li>
         <li>第一次会弹出独立窗口。关掉窗口即退出，不必关后台。</li>
       </ol>
       <div class="shot">
         <strong>前锋刷题软件</strong><br />
-        <span>刷题 / 考试 · 进度保存在这台电脑</span>
+        <span>选择题练习 · 进度保存在这台电脑</span>
       </div>
     </section>
 
@@ -109,7 +101,7 @@
       <h2>Windows 提示「已保护你的电脑」时</h2>
       <ol>
         <li>点「更多信息」，再点「仍要运行」。</li>
-        <li>或者：右键 <span class="file">打开前锋刷题.vbs</span> / <span class="file">前锋刷题.bat</span> → 属性 → 勾选「解除锁定」→ 确定。</li>
+        <li>或者：右键 <span class="file">start.bat</span> / <span class="file">open.vbs</span> → 属性 → 勾选「解除锁定」→ 确定。</li>
         <li>从 QQ / 微信 / 网盘下载的压缩包常会带这个标记，解压后按上面做一次即可。</li>
       </ol>
     </section>
@@ -118,8 +110,8 @@
       <h2>进度会保留</h2>
       <ul>
         <li>做题记录、导入的题库、API Key 都存在这台电脑上，<strong>下次打开还在</strong>。</li>
-        <li>不要删除 <span class="file">%APPDATA%\前锋刷题软件</span>，也不要清除「前锋刷题软件」窗口里的网站数据。</li>
-        <li>换电脑时：点「导出」，勾选完整备份（题库、记录、成绩、收藏），再选保存位置。到新电脑后用「导入题库」打开这份 JSON。</li>
+        <li>不要删除 <span class="file">%APPDATA%\QianfengShuati</span>，也不要清除「前锋刷题软件」窗口里的网站数据。</li>
+        <li>换电脑时：打开「设置 → 题库设置 → 导出」，勾选完整备份，再选保存位置。到新电脑后用「设置 → 题库设置 → 导入」打开这份 JSON。</li>
       </ul>
     </section>
 
@@ -130,10 +122,10 @@
         <li>刷题模式：点选项立刻显示对错和解析。侧边栏「题库」标题下可搜索本题库，也可用错题、收藏筛选。</li>
         <li>题目卡片上可点「收藏」，之后在侧边栏只看收藏的题。</li>
         <li>考试模式：选题库后点「开始考试」。答题中不显示答案，交卷后出分，并写入成绩档案，可随时回看。右键成绩可删除，档案页可全部清空。</li>
-        <li>点「导出」会弹出选项：先选导出哪些（当前/全部题库、记录、成绩、收藏），再选保存位置。</li>
-        <li>侧边栏「导入题库」，拖入 <span class="file">题库/sample-questions.json</span> 或 <span class="file">题库/sample-questions.txt</span>。也可导入自己的 JSON、Markdown、CSV、文本，或本软件导出的备份文件。</li>
-        <li>课内试卷请留在本机，不要提交到仓库。</li>
-        <li>有自己的 API Key 时，可在「API 设置」里填写，答完题后生成解析。不填也能刷题。</li>
+        <li>侧边栏「载入示例题库」、打乱题序/选项、清空记录仍在原来的位置。</li>
+        <li>侧边栏点「设置」后，主界面是可折叠的「题库设置」和「API 设置」。点开后才显示导入、导出、编辑题目或填写接口。</li>
+        <li>可用「载入示例题库」，或把 <span class="file">questions/sample-questions.json</span>、<span class="file">questions/sample-questions.txt</span> 拖进窗口。课内试卷请留在本机，不要提交到仓库。</li>
+        <li>有自己的 API Key 时，在设置页的「API 设置」里填写，答完题后可生成解析。不填也能刷题。</li>
       </ol>
     </section>
   </div>

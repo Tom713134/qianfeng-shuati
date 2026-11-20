@@ -4,20 +4,209 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>前锋刷题软件</title>
-  <meta name="description" content="前锋刷题软件：解压即用的 Windows 选择题练习。刷题或考试模式，搜索与收藏，成绩档案，导入 JSON / Markdown。不用注册，数据只在本机。" />
-  <meta property="og:title" content="前锋刷题软件 / Qianfeng Shuati" />
-  <meta property="og:description" content="解压即用的 Windows 选择题练习。刷题即时出解，考试交卷出分，可备份进度。不用注册，数据只在本机。" />
-  <meta property="og:type" content="website" />
-  <meta property="og:image" content="docs/social-preview.png" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="theme-color" content="#1a2420" />
-  <link rel="icon" href="前锋刷题.ico" />
+  <link rel="icon" href="app.ico" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="app">
     <aside id="sidebar" class="sidebar" aria-label="题库"></aside>
-    <main id="stage"></main>
+    <div class="main-col">
+      <main id="stage" class="stage"></main>
+      <section id="bankSettings" class="stage settings-page" hidden>
+        <div class="sheet">
+          <div class="top">
+            <button type="button" class="menu-btn" data-action="toggle-sidebar">题库</button>
+            <div><h2>设置</h2></div>
+            <button type="button" class="ghost" data-action="close-settings">返回</button>
+          </div>
+          <div class="settings-list">
+            <section class="settings-fold" data-settings-section="bank">
+              <button type="button" class="settings-fold-head" data-action="settings-section" data-section="bank" aria-expanded="false">
+                <span>
+                  <strong>题库设置</strong>
+                  <em>导入、导出、改名和编辑题目</em>
+                </span>
+                <span class="settings-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="settings-fold-body" hidden>
+                <div class="settings-block" data-bank-panel="import">
+                  <h3>导入</h3>
+                  <p class="muted">支持 JSON、CSV、Markdown 和文本，也可以导入本软件导出的备份文件。</p>
+                  <div class="settings-box">
+              <textarea id="pasteArea" spellcheck="false" placeholder="把题目粘贴到这里，或选择文件"></textarea>
+              <details>
+                <summary>查看格式说明</summary>
+                <div class="help">
+                  <p>JSON：每题包含 question、options、answer、explanation。多选答案写成 BD。</p>
+                  <pre>{
+  "name": "我的题库",
+  "questions": [
+    {
+      "question": "题干",
+      "options": ["选项一", "选项二", "选项三", "选项四"],
+      "answer": "B",
+      "explanation": "解析"
+    }
+  ]
+}</pre>
+                  <p>文本或 Markdown：题目用 1. 2. 编号，或题目之间空一行。选项写成 A. / A)；答案写成 答案：B 或 **Answer: B**，写在选项后面同一行也可以。</p>
+                  <pre>1. 题干
+A. 选项
+B. 选项
+**Answer: A**
+解析：说明</pre>
+                  <p>CSV 第一行表头：question,A,B,C,D,answer,explanation</p>
+                </div>
+              </details>
+              <p id="importError" class="form-error"></p>
+              <div class="nav">
+                <button type="button" class="ghost" id="fillSample">填入示例</button>
+                <button type="button" class="ghost" id="chooseFile">选择文件</button>
+                <button type="button" class="primary" id="doImport">导入</button>
+              </div>
+                  </div>
+                </div>
+
+                <div class="settings-block" data-bank-panel="export">
+                  <h3>导出</h3>
+                  <p class="muted">先选导出哪些，再选保存位置。</p>
+                  <div class="settings-box">
+              <p class="side-label-plain">导出哪些</p>
+              <label class="check"><input id="exportPresetAll" type="checkbox" /> 完整备份（题库、记录、成绩、收藏）</label>
+              <fieldset class="export-scope">
+                <legend>题目范围</legend>
+                <label class="check"><input name="exportScope" type="radio" value="current" checked /> 当前题库</label>
+                <label class="check"><input name="exportScope" type="radio" value="all" /> 全部题库</label>
+                <label class="check"><input id="exportIncludeBanks" type="checkbox" checked /> 题目内容</label>
+              </fieldset>
+              <label class="check"><input id="exportRecords" type="checkbox" /> 做题记录</label>
+              <label class="check"><input id="exportHistory" type="checkbox" /> 考试成绩</label>
+              <label class="check"><input id="exportFlags" type="checkbox" /> 收藏标记</label>
+              <p class="side-label-plain">保存位置</p>
+              <label class="check"><input name="exportWhere" type="radio" value="picker" id="exportWherePicker" checked /> 选择文件保存位置</label>
+              <label class="check"><input name="exportWhere" type="radio" value="download" /> 保存到浏览器默认下载文件夹</label>
+              <p id="exportHint" class="muted"></p>
+              <p id="exportError" class="form-error"></p>
+              <div class="nav">
+                <span></span>
+                <button type="button" class="primary" id="doExport">导出</button>
+              </div>
+                  </div>
+                </div>
+
+                <div class="settings-block" data-bank-panel="edit">
+                  <h3>编辑题库</h3>
+                  <p id="manageHint" class="muted">改名、复制、增删改题目都在这一页。</p>
+                  <div class="settings-box">
+              <label class="field">题库名称
+                <input id="bankNameInput" type="text" maxlength="80" autocomplete="off" />
+              </label>
+              <p id="manageMeta" class="muted"></p>
+              <p id="manageError" class="form-error"></p>
+              <div class="manage-actions">
+                <button type="button" class="ghost" id="saveBankName">保存名称</button>
+                <button type="button" class="ghost" id="duplicateBank">复制本题库</button>
+                <button type="button" class="ghost danger-text" id="deleteBankBtn">删除本题库</button>
+              </div>
+              <p class="side-label-plain">编辑题目</p>
+              <label class="field">选择题目
+                <select id="editQuestionSelect"></select>
+              </label>
+              <label class="field">题干
+                <textarea id="editStem" class="edit-area" spellcheck="false"></textarea>
+              </label>
+              <label class="field">题型
+                <select id="editType">
+                  <option value="single">单选</option>
+                  <option value="multiple">多选</option>
+                </select>
+              </label>
+              <label class="field">选项（每行一个，从上到下为 A、B、C…）
+                <textarea id="editOptions" class="edit-area" spellcheck="false"></textarea>
+              </label>
+              <label class="field">正确答案
+                <input id="editAnswer" type="text" spellcheck="false" placeholder="如 B 或 ABD" autocomplete="off" />
+              </label>
+              <label class="field">解析
+                <textarea id="editExplain" class="edit-area" spellcheck="false"></textarea>
+              </label>
+              <p id="editError" class="form-error"></p>
+              <div class="nav">
+                <button type="button" class="ghost" id="addQuestionBtn">新增题目</button>
+                <button type="button" class="ghost danger-text" id="deleteQuestionBtn">删除本题</button>
+                <button type="button" class="ghost" id="moveQuestionUp">上移</button>
+                <button type="button" class="ghost" id="moveQuestionDown">下移</button>
+                <button type="button" class="primary" id="saveQuestionBtn">保存本题</button>
+              </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-fold" data-settings-section="api">
+              <button type="button" class="settings-fold-head" data-action="settings-section" data-section="api" aria-expanded="false">
+                <span>
+                  <strong>API 设置</strong>
+                  <em>填写接口和 Key，用于生成解析。不填也能刷题。</em>
+                </span>
+                <span class="settings-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="settings-fold-body" hidden>
+                <div class="settings-box">
+            <p class="muted">Key 只保存在这台电脑的浏览器里，不会随题库导出。兼容 OpenAI 格式的接口都可以用。</p>
+            <div class="preset-row">
+              <button type="button" class="ghost" data-action="api-preset" data-base="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</button>
+              <button type="button" class="ghost" data-action="api-preset" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</button>
+              <button type="button" class="ghost" data-action="api-preset" data-base="http://127.0.0.1:11434/v1" data-model="llama3.1">Ollama</button>
+            </div>
+            <label class="field">接口地址
+              <input id="apiBaseInput" type="url" spellcheck="false" placeholder="https://api.deepseek.com/v1" autocomplete="off" />
+            </label>
+            <label class="field">模型
+              <input id="apiModelInput" type="text" spellcheck="false" placeholder="deepseek-chat" autocomplete="off" />
+            </label>
+            <label class="field">API Key
+              <input id="apiKeyInput" type="password" spellcheck="false" placeholder="sk-…" autocomplete="off" />
+            </label>
+            <p id="apiError" class="form-error"></p>
+            <div class="nav">
+              <button type="button" class="ghost" id="clearApi">清除 Key</button>
+              <button type="button" class="primary" id="saveApi">保存</button>
+            </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-fold" data-settings-section="sponsor">
+              <button type="button" class="settings-fold-head" data-action="settings-section" data-section="sponsor" aria-expanded="false">
+                <span>
+                  <strong>赞助作者</strong>
+                  <em>如果软件帮到你，可通过微信或支付宝随意支持一下。</em>
+                </span>
+                <span class="settings-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="settings-fold-body" hidden>
+                <div class="settings-box sponsor-box">
+                  <p class="muted">选择支付方式后，用手机扫码即可。金额请在手机里自行填写。感谢支持前锋刷题软件。</p>
+                  <p class="side-label-plain">支付方式</p>
+                  <div class="preset-row sponsor-methods" role="group" aria-label="支付方式">
+                    <button type="button" class="ghost" data-action="sponsor-method" data-method="wechat" aria-pressed="true">微信支付</button>
+                    <button type="button" class="ghost" data-action="sponsor-method" data-method="alipay" aria-pressed="false">支付宝</button>
+                  </div>
+                  <div class="sponsor-pay">
+                    <img id="sponsorQr" class="sponsor-qr" src="sponsor/wechat.png" alt="微信收款码" />
+                    <div class="sponsor-copy">
+                      <p id="sponsorHint" class="sponsor-hint">请使用微信扫码赞助</p>
+                      <p class="muted">打开对应 App 扫一扫即可，金额自定。</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
   <div id="scrim" class="scrim"></div>
   <div id="dropmask" class="dropmask">松开即可导入题库</div>
@@ -30,74 +219,6 @@
   <input id="fileInput" type="file" hidden accept=".json,.txt,.md,.csv,.tsv,text/plain,text/markdown,application/json" multiple />
   <input id="backupInput" type="file" hidden accept=".json,application/json" />
 
-  <dialog id="importDialog" aria-labelledby="importTitle">
-    <form class="dialog-body" method="dialog">
-      <div class="dialog-head">
-        <h2 id="importTitle">导入题库</h2>
-        <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
-      </div>
-      <p class="muted">支持 JSON、CSV、Markdown 和文本，也可以导入本软件导出的备份文件。导入后保存在这台电脑的浏览器里。</p>
-      <textarea id="pasteArea" spellcheck="false" placeholder="把题目粘贴到这里，或选择文件"></textarea>
-      <details>
-        <summary>查看格式说明</summary>
-        <div class="help">
-          <p>JSON：每题包含 question、options、answer、explanation。多选答案写成 BD。</p>
-          <pre>{
-  "name": "我的题库",
-  "questions": [
-    {
-      "question": "题干",
-      "options": ["选项一", "选项二", "选项三", "选项四"],
-      "answer": "B",
-      "explanation": "解析"
-    }
-  ]
-}</pre>
-          <p>文本或 Markdown：题目用 1. 2. 编号，或题目之间空一行。选项写成 A. / A)；答案写成 答案：B 或 **Answer: B**，写在选项后面同一行也可以。</p>
-          <pre>1. 题干
-A. 选项
-B. 选项
-**Answer: A**
-解析：说明</pre>
-          <p>CSV 第一行表头：question,A,B,C,D,answer,explanation</p>
-        </div>
-      </details>
-      <p id="importError" class="form-error"></p>
-      <div class="dialog-foot">
-        <button type="button" class="ghost" id="fillSample">填入示例</button>
-        <button type="button" class="ghost" id="chooseFile">选择文件</button>
-        <button type="button" class="primary" id="doImport">导入</button>
-      </div>
-    </form>
-  </dialog>
-  <dialog id="apiDialog" aria-labelledby="apiTitle">
-    <form class="dialog-body" method="dialog">
-      <div class="dialog-head">
-        <h2 id="apiTitle">API 设置</h2>
-        <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
-      </div>
-      <p class="muted">Key 只保存在这台电脑的浏览器里，不会随题库导出。兼容 OpenAI 格式的接口都可以用。</p>
-      <div class="preset-row">
-        <button type="button" class="ghost" data-action="api-preset" data-base="https://api.deepseek.com/v1" data-model="deepseek-chat">DeepSeek</button>
-        <button type="button" class="ghost" data-action="api-preset" data-base="https://api.openai.com/v1" data-model="gpt-4o-mini">OpenAI</button>
-        <button type="button" class="ghost" data-action="api-preset" data-base="http://127.0.0.1:11434/v1" data-model="llama3.1">Ollama</button>
-      </div>
-      <label class="field">接口地址
-        <input id="apiBaseInput" type="url" spellcheck="false" placeholder="https://api.deepseek.com/v1" autocomplete="off" />
-      </label>
-      <label class="field">模型
-        <input id="apiModelInput" type="text" spellcheck="false" placeholder="deepseek-chat" autocomplete="off" />
-      </label>
-      <label class="field">API Key
-        <input id="apiKeyInput" type="password" spellcheck="false" placeholder="sk-…" autocomplete="off" />
-      </label>
-      <p id="apiError" class="form-error"></p>
-      <div class="dialog-foot">
-        <button type="button" class="ghost" id="clearApi">清除 Key</button>
-        <button type="button" class="primary" id="saveApi">保存</button>
-      </div>
-    </form>
-  </dialog>
   <dialog id="examDialog" aria-labelledby="examTitle">
     <form class="dialog-body" method="dialog">
       <div class="dialog-head">
@@ -125,35 +246,6 @@ B. 选项
       <div class="dialog-foot">
         <button type="submit" class="ghost" value="cancel">取消</button>
         <button type="button" class="primary" id="doExam">开始考试</button>
-      </div>
-    </form>
-  </dialog>
-  <dialog id="exportDialog" aria-labelledby="exportTitle">
-    <form class="dialog-body" method="dialog">
-      <div class="dialog-head">
-        <h2 id="exportTitle">导出</h2>
-        <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
-      </div>
-      <p class="muted">先选导出哪些，再选保存位置。</p>
-      <p class="side-label-plain">导出哪些</p>
-      <label class="check"><input id="exportPresetAll" type="checkbox" /> 完整备份（题库、记录、成绩、收藏）</label>
-      <fieldset class="export-scope">
-        <legend>题目范围</legend>
-        <label class="check"><input name="exportScope" type="radio" value="current" checked /> 当前题库</label>
-        <label class="check"><input name="exportScope" type="radio" value="all" /> 全部题库</label>
-        <label class="check"><input id="exportIncludeBanks" type="checkbox" checked /> 题目内容</label>
-      </fieldset>
-      <label class="check"><input id="exportRecords" type="checkbox" /> 做题记录</label>
-      <label class="check"><input id="exportHistory" type="checkbox" /> 考试成绩</label>
-      <label class="check"><input id="exportFlags" type="checkbox" /> 收藏标记</label>
-      <p class="side-label-plain">保存位置</p>
-      <label class="check"><input name="exportWhere" type="radio" value="picker" id="exportWherePicker" checked /> 选择文件保存位置</label>
-      <label class="check"><input name="exportWhere" type="radio" value="download" /> 保存到浏览器默认下载文件夹</label>
-      <p id="exportHint" class="muted"></p>
-      <p id="exportError" class="form-error"></p>
-      <div class="dialog-foot">
-        <button type="submit" class="ghost" value="cancel">取消</button>
-        <button type="button" class="primary" id="doExport">导出</button>
       </div>
     </form>
   </dialog>
