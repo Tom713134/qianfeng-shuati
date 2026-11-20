@@ -63,6 +63,41 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .logo strong { display: block; font-size: 18px; letter-spacing: 0.04em; }
 .logo em { display: block; font-style: normal; color: rgba(255, 255, 255, 0.62); font-size: 12px; }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 10px 0 12px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mode-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  border-radius: 10px;
+  padding: 8px 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.mode-btn:hover { background: rgba(255, 255, 255, 0.06); }
+
+.mode-btn[aria-pressed="true"] {
+  background: #e0b15a;
+  color: #1a2420;
+}
+
+.mode-lock {
+  margin: 10px 0 4px;
+  color: #e0b15a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
 .side-label {
   margin: 18px 4px 8px;
   font-size: 12px;
@@ -153,7 +188,60 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .qdot:hover { background: rgba(255, 255, 255, 0.16); }
 .qdot.correct { background: #1f7a4d; color: white; }
 .qdot.wrong { background: #a33b32; color: white; }
+.qdot.answered { background: rgba(224, 177, 90, 0.42); color: #f4efe6; }
 .qdot.current { outline: 2px solid #e0b15a; outline-offset: 1px; }
+
+.exam-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  background: #1a2420;
+  color: #f4efe6;
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.exam-banner.review { background: #0f6e62; }
+.exam-banner .ghost {
+  margin-left: auto;
+  background: transparent;
+  color: #f4efe6;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.exam-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #e0b15a;
+}
+
+.exam-timer.warn { color: #f3b4ae; }
+
+.badge.exam {
+  background: #1a2420;
+  color: #e0b15a;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.field select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e4dccc;
+  border-radius: 12px;
+  background: white;
+  font: inherit;
+  color: inherit;
+}
 
 .store-note {
   color: rgba(255, 255, 255, 0.45);

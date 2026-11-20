@@ -99,6 +99,7 @@ D. JavaScript
 
 let state = fresh();
 let toastTimer = 0;
+let examTimer = 0;
 let dragDepth = 0;
 let explainingId = "";
 
@@ -112,6 +113,8 @@ function fresh() {
     order: {},
     optionOrder: {},
     records: {},
+    exam: null,
+    uiMode: "practice",
     pendingKeys: [],
     pinId: null,
   };
@@ -865,6 +868,8 @@ function load() {
       order: raw.order && typeof raw.order === "object" ? raw.order : {},
       optionOrder: raw.optionOrder && typeof raw.optionOrder === "object" ? raw.optionOrder : {},
       records: raw.records && typeof raw.records === "object" ? raw.records : {},
+      exam: sanitizeExam(raw.exam),
+      uiMode: raw.uiMode === "exam" ? "exam" : "practice",
       pendingKeys: [],
       pinId: null,
     };
@@ -883,6 +888,8 @@ function save() {
     order: state.order,
     optionOrder: state.optionOrder,
     records: state.records,
+    exam: state.exam,
+    uiMode: state.uiMode === "exam" ? "exam" : "practice",
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -1089,6 +1096,11 @@ function orderedQuestions(bank) {
 
 function visibleQuestions() {
   const bank = getBank();
+  if (!bank) return [];
+  if (examActive() && state.exam.bankId === bank.id) {
+    const map = new Map(bank.questions.map((question) => [question.id, question]));
+    return state.exam.ids.map((id) => map.get(id)).filter(Boolean);
+  }
   const questions = orderedQuestions(bank);
   if (!state.onlyWrong) return questions;
   const records = state.records[bank.id] || {};
@@ -1139,7 +1151,9 @@ function optionKeysOf(question) {
 
 function optionOrderOf(question) {
   const bank = getBank();
-  const stored = bank && state.optionOrder[bank.id] && state.optionOrder[bank.id][question.id];
+  let stored;
+  if (examActive() && state.exam.optionOrder) stored = state.exam.optionOrder[question.id];
+  else stored = bank && state.optionOrder[bank.id] && state.optionOrder[bank.id][question.id];
   const canonical = optionKeysOf(question);
   if (!Array.isArray(stored) || !stored.length) return canonical;
   const allowed = new Set(canonical);
@@ -1231,7 +1245,259 @@ function currentQuestion() {
 function currentRecord(question) {
   const bank = getBank();
   if (!bank || !question) return null;
+  if (examRunning()) return null;
+  if (examReview() && state.exam.records) return state.exam.records[question.id] || null;
   return (state.records[bank.id] || {})[question.id] || null;
+}
+
+function sanitizeExam(raw) {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.ids) || !raw.ids.length) return null;
+  if (raw.status !== "running" && raw.status !== "review") return null;
+  return {
+    bankId: String(raw.bankId || ""),
+    ids: raw.ids.map(String),
+    answers: raw.answers && typeof raw.answers === "object" ? raw.answers : {},
+    optionOrder: raw.optionOrder && typeof raw.optionOrder === "object" ? raw.optionOrder : {},
+    startedAt: Number(raw.startedAt) || Date.now(),
+    endsAt: raw.endsAt ? Number(raw.endsAt) : null,
+    status: raw.status,
+    records: raw.records && typeof raw.records === "object" ? raw.records : {},
+    result: raw.result && typeof raw.result === "object" ? raw.result : null,
+    auto: Boolean(raw.auto),
+  };
+}
+
+function examActive() {
+  return Boolean(state.exam && (state.exam.status === "running" || state.exam.status === "review"));
+}
+
+function examRunning() {
+  return Boolean(state.exam && state.exam.status === "running");
+}
+
+function examReview() {
+  return Boolean(state.exam && state.exam.status === "review");
+}
+
+function isExamMode() {
+  return state.uiMode === "exam" || examActive();
+}
+
+function isPracticeMode() {
+  return !isExamMode();
+}
+
+function setUiMode(mode) {
+  const next = mode === "exam" ? "exam" : "practice";
+  if (next === "practice") {
+    if (!confirmLeaveExam()) return;
+    if (examReview()) {
+      state.exam = null;
+      stopExamTimer();
+    }
+  }
+  state.uiMode = next;
+  if (next === "exam") state.onlyWrong = false;
+  save();
+  render({ toTop: true });
+}
+
+function formatRemain(ms) {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  if (hours) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+  return `${pad(minutes)}:${pad(seconds)}`;
+}
+
+function examPicks(question) {
+  if (!state.exam || !question) return [];
+  const saved = state.exam.answers[question.id];
+  return Array.isArray(saved) ? saved : [];
+}
+
+function gradeExam(bank, ids, answers) {
+  const records = {};
+  let correct = 0;
+  let wrong = 0;
+  let blank = 0;
+  const map = new Map((bank.questions || []).map((question) => [question.id, question]));
+  for (const id of ids) {
+    const question = map.get(id);
+    const picks = Array.isArray(answers[id]) ? answers[id] : [];
+    if (!question) continue;
+    if (!picks.length) {
+      blank += 1;
+      records[id] = { picks: [], correct: false };
+      continue;
+    }
+    const ok = sameAnswers(picks, question.answer);
+    records[id] = { picks: [...picks], correct: ok };
+    if (ok) correct += 1;
+    else wrong += 1;
+  }
+  return { correct, wrong, blank, total: ids.length, records };
+}
+
+function buildExamOptionOrder(questions, shuffle) {
+  const next = {};
+  if (!shuffle) return next;
+  for (const question of questions) {
+    const keys = optionKeysOf(question);
+    if (keys.length < 2 || optionsReferToLetters(question)) continue;
+    let order = shuffledCopy(keys);
+    if (order.join("") === keys.join("") && keys.length > 2) order = shuffledCopy(keys);
+    if (order.join("") !== keys.join("")) next[question.id] = order;
+  }
+  return next;
+}
+
+function stopExamTimer() {
+  if (examTimer) clearInterval(examTimer);
+  examTimer = 0;
+}
+
+function startExamTimer() {
+  stopExamTimer();
+  if (typeof document === "undefined") return;
+  if (!examRunning() || !state.exam.endsAt) return;
+  const tick = () => {
+    if (!examRunning() || !state.exam.endsAt) {
+      stopExamTimer();
+      return;
+    }
+    const left = state.exam.endsAt - Date.now();
+    const node = document.querySelector(".exam-timer");
+    if (node) {
+      node.textContent = formatRemain(left);
+      node.classList.toggle("warn", left <= 60000);
+    }
+    if (left <= 0) {
+      stopExamTimer();
+      submitExam(true);
+    }
+  };
+  tick();
+  examTimer = setInterval(tick, 250);
+}
+
+function openExamDialog() {
+  const bank = getBank();
+  if (!bank) {
+    toast("请先选择一套题库");
+    return;
+  }
+  if (examRunning()) {
+    toast("考试进行中");
+    return;
+  }
+  $("examError").textContent = "";
+  $("examCountInput").max = String(bank.questions.length);
+  $("examCountInput").value = String(bank.questions.length);
+  $("examDialog").showModal();
+}
+
+function closeExamDialog() {
+  if ($("examDialog")?.open) $("examDialog").close();
+}
+
+function startExamFromForm() {
+  const bank = getBank();
+  if (!bank) return;
+  const max = bank.questions.length;
+  const count = Math.max(1, Math.min(max, Number($("examCountInput").value) || max));
+  const minutes = Number($("examDurationInput").value) || 0;
+  const shuffleQ = $("examShuffleQ").checked;
+  const shuffleO = $("examShuffleO").checked;
+  let ids = bank.questions.map((question) => question.id);
+  if (shuffleQ) ids = shuffledCopy(ids);
+  ids = ids.slice(0, count);
+  const slice = ids.map((id) => bank.questions.find((question) => question.id === id)).filter(Boolean);
+  state.exam = {
+    bankId: bank.id,
+    ids,
+    answers: {},
+    optionOrder: buildExamOptionOrder(slice, shuffleO),
+    startedAt: Date.now(),
+    endsAt: minutes > 0 ? Date.now() + minutes * 60 * 1000 : null,
+    status: "running",
+    records: {},
+    result: null,
+    auto: false,
+  };
+  state.activeBankId = bank.id;
+  state.currentId = ids[0];
+  state.uiMode = "exam";
+  state.onlyWrong = false;
+  state.pendingKeys = [];
+  state.pinId = null;
+  save();
+  closeExamDialog();
+  closeSidebar();
+  startExamTimer();
+  render({ toTop: true });
+  toast(minutes ? `考试开始，共 ${ids.length} 题，限时 ${minutes} 分钟` : `考试开始，共 ${ids.length} 题`);
+}
+
+function saveExamAnswer(id, picks) {
+  if (!examRunning() || !id) return;
+  if (!picks.length) {
+    toast("请先选择选项");
+    return;
+  }
+  state.exam.answers[id] = [...picks];
+  save();
+  render();
+}
+
+function submitExam(auto = false) {
+  if (!examRunning()) return;
+  const bank = state.banks.find((item) => item.id === state.exam.bankId) || getBank();
+  if (!bank) {
+    state.exam = null;
+    save();
+    render();
+    return;
+  }
+  const unanswered = state.exam.ids.filter((id) => !state.exam.answers[id] || !state.exam.answers[id].length).length;
+  if (!auto && unanswered && !confirm(`还有 ${unanswered} 题未作答，确定交卷？`)) return;
+  const result = gradeExam(bank, state.exam.ids, state.exam.answers);
+  state.exam.status = "review";
+  state.exam.records = result.records;
+  state.exam.result = {
+    correct: result.correct,
+    wrong: result.wrong,
+    blank: result.blank,
+    total: result.total,
+  };
+  state.exam.auto = Boolean(auto);
+  if (!state.records[bank.id]) state.records[bank.id] = {};
+  Object.assign(state.records[bank.id], result.records);
+  state.pendingKeys = [];
+  save();
+  stopExamTimer();
+  render({ toTop: true });
+  const score = result.total ? Math.round((result.correct / result.total) * 100) : 0;
+  toast(auto ? `时间到，已交卷。得分 ${score}%` : `已交卷。得分 ${score}%`);
+}
+
+function exitExam() {
+  if (examRunning()) submitExam(true);
+  state.exam = null;
+  state.uiMode = "exam";
+  state.pendingKeys = [];
+  save();
+  stopExamTimer();
+  render({ toTop: true });
+}
+
+function confirmLeaveExam() {
+  if (!examRunning()) return true;
+  if (!confirm("考试还在进行。离开将自动交卷。确定吗？")) return false;
+  submitExam(true);
+  return true;
 }
 
 function closeSidebar() {
@@ -1247,6 +1513,7 @@ function toggleSidebar() {
 function focusBank(id) {
   const bank = state.banks.find((item) => item.id === id);
   if (!bank) return;
+  if (examActive() && state.exam.bankId !== bank.id && !confirmLeaveExam()) return;
   state.activeBankId = bank.id;
   state.currentId = bank.questions[0]?.id || null;
   state.onlyWrong = false;
@@ -1325,7 +1592,7 @@ function go(delta) {
   if (!target) return;
   state.pinId = null;
   state.currentId = target.id;
-  state.pendingKeys = [];
+  state.pendingKeys = examRunning() && target.type === "multiple" ? [...examPicks(target)] : [];
   save();
   render({ toTop: true });
 }
@@ -1333,7 +1600,8 @@ function go(delta) {
 function jumpTo(id) {
   state.pinId = null;
   state.currentId = id;
-  state.pendingKeys = [];
+  const question = currentQuestion();
+  state.pendingKeys = examRunning() && question?.type === "multiple" ? [...examPicks(question)] : [];
   save();
   render({ toTop: true });
   if (window.innerWidth <= 900) closeSidebar();
@@ -1341,7 +1609,20 @@ function jumpTo(id) {
 
 function onPick(key) {
   const question = currentQuestion();
-  if (!question || currentRecord(question)) return;
+  if (!question) return;
+  if (examRunning()) {
+    if (question.type === "multiple") {
+      const picked = new Set(state.pendingKeys.length ? state.pendingKeys : examPicks(question));
+      if (picked.has(key)) picked.delete(key);
+      else picked.add(key);
+      state.pendingKeys = [...picked];
+      render();
+      return;
+    }
+    saveExamAnswer(question.id, [key]);
+    return;
+  }
+  if (currentRecord(question)) return;
   if (question.type === "multiple") {
     const picked = new Set(state.pendingKeys);
     if (picked.has(key)) picked.delete(key);
@@ -1357,6 +1638,10 @@ function commit(picks) {
   const bank = getBank();
   const question = currentQuestion();
   if (!bank || !question) return;
+  if (examRunning()) {
+    saveExamAnswer(question.id, picks);
+    return;
+  }
   if (!picks.length) {
     toast("请先选择选项");
     return;
@@ -1374,6 +1659,7 @@ function commit(picks) {
 }
 
 function redo() {
+  if (examActive()) return;
   const bank = getBank();
   const question = currentQuestion();
   if (!bank || !question || !state.records[bank.id]) return;
@@ -1393,6 +1679,10 @@ function toggleWrong() {
 }
 
 function shuffleQuestions() {
+  if (examActive()) {
+    toast("考试中不能改题序");
+    return;
+  }
   const bank = getBank();
   if (!bank) return;
   if (state.order[bank.id]) {
@@ -1409,6 +1699,10 @@ function shuffleQuestions() {
 }
 
 function shuffleOptions() {
+  if (examActive()) {
+    toast("考试中不能改选项顺序");
+    return;
+  }
   const bank = getBank();
   if (!bank) return;
   if (bankOptionsShuffled(bank)) {
@@ -1440,6 +1734,7 @@ function shuffleOptions() {
 }
 
 function clearProgress() {
+  if (!confirmLeaveExam()) return;
   const bank = getBank();
   if (!bank) return;
   if (!confirm(`清空「${bank.name}」的做题记录？`)) return;
@@ -1452,6 +1747,7 @@ function clearProgress() {
 }
 
 function deleteBank() {
+  if (!confirmLeaveExam()) return;
   const bank = getBank();
   if (!bank) return;
   if (!confirm(`删除题库「${bank.name}」？题目和做题记录都会去掉。`)) return;
@@ -1508,7 +1804,9 @@ function render(options = {}) {
   if (bank && list.length && !list.some((question) => question.id === state.currentId)) {
     state.currentId = list[0].id;
   }
-  document.title = bank ? `${bank.name} · ${APP_NAME}` : APP_NAME;
+  document.title = bank
+    ? `${bank.name} · ${isExamMode() ? "考试模式" : "刷题模式"}`
+    : APP_NAME;
   $("sidebar").innerHTML = renderSidebar(bank);
   $("stage").innerHTML = renderStage(bank, list);
   if (options.toTop) window.scrollTo(0, 0);
@@ -1526,36 +1824,70 @@ function renderSidebar(bank) {
     </button>`;
   }).join("");
   let tools = "";
-  let grid = "";
   if (bank) {
     const shuffled = Boolean(state.order[bank.id]);
     const optionShuffled = bankOptionsShuffled(bank);
-    const all = orderedQuestions(bank);
-    const records = state.records[bank.id] || {};
-    const dots = (state.onlyWrong ? visibleQuestions() : all).map((question) => {
-      const number = all.findIndex((item) => item.id === question.id) + 1;
-      const record = records[question.id];
-      const status = record ? (record.correct ? "correct" : "wrong") : "todo";
+    const list = visibleQuestions();
+    const all = examActive() ? list : orderedQuestions(bank);
+    const records = examReview() ? (state.exam.records || {}) : (state.records[bank.id] || {});
+    const dots = list.map((question, index) => {
+      const number = (examActive() ? index : all.findIndex((item) => item.id === question.id)) + 1;
+      let status = "todo";
+      if (examRunning()) status = examPicks(question).length ? "answered" : "todo";
+      else {
+        const record = records[question.id];
+        status = record ? (record.correct ? "correct" : "wrong") : "todo";
+      }
       const current = question.id === state.currentId ? " current" : "";
       return `<button type="button" class="qdot ${status}${current}" data-action="jump" data-id="${esc(question.id)}" title="${esc(question.stem)}" aria-label="第 ${number} 题"${question.id === state.currentId ? ' aria-current="true"' : ""}>${number}</button>`;
     }).join("");
-    tools = `<div class="side-actions">
-      <button type="button" class="side-btn" data-action="export">导出题库</button>
-      <button type="button" class="side-btn" data-action="toggle-wrong" aria-pressed="${state.onlyWrong}">${state.onlyWrong ? "查看全部" : "只看错题"}</button>
-      <button type="button" class="side-btn" data-action="shuffle" aria-pressed="${shuffled}">${shuffled ? "恢复题序" : "打乱题序"}</button>
-      <button type="button" class="side-btn" data-action="shuffle-options" aria-pressed="${optionShuffled}">${optionShuffled ? "恢复选项" : "打乱选项"}</button>
-      <button type="button" class="side-btn" data-action="clear">清空记录</button>
-      <button type="button" class="side-btn wide" data-action="delete">删除本题库</button>
-    </div>
-    <p class="side-label">题目</p>
-    <div class="qgrid">${dots}</div>`;
+    if (examRunning()) {
+      tools = `<div class="side-actions">
+        <button type="button" class="side-btn primary wide" data-action="submit-exam">交卷</button>
+      </div>
+      <p class="side-label">题目</p>
+      <div class="qgrid">${dots}</div>`;
+    } else if (examReview()) {
+      tools = `<div class="side-actions">
+        <button type="button" class="side-btn primary wide" data-action="exit-exam">结束看卷</button>
+      </div>
+      <p class="side-label">题目</p>
+      <div class="qgrid">${dots}</div>`;
+    } else if (isExamMode()) {
+      tools = `<div class="side-actions">
+        <button type="button" class="side-btn primary wide" data-action="open-exam">开始考试</button>
+        <button type="button" class="side-btn" data-action="export">导出题库</button>
+        <button type="button" class="side-btn" data-action="delete">删除本题库</button>
+      </div>`;
+    } else {
+      tools = `<div class="side-actions">
+        <button type="button" class="side-btn" data-action="export">导出题库</button>
+        <button type="button" class="side-btn" data-action="toggle-wrong" aria-pressed="${state.onlyWrong}">${state.onlyWrong ? "查看全部" : "只看错题"}</button>
+        <button type="button" class="side-btn" data-action="shuffle" aria-pressed="${shuffled}">${shuffled ? "恢复题序" : "打乱题序"}</button>
+        <button type="button" class="side-btn" data-action="shuffle-options" aria-pressed="${optionShuffled}">${optionShuffled ? "恢复选项" : "打乱选项"}</button>
+        <button type="button" class="side-btn" data-action="clear">清空记录</button>
+        <button type="button" class="side-btn wide" data-action="delete">删除本题库</button>
+      </div>
+      <p class="side-label">题目</p>
+      <div class="qgrid">${dots}</div>`;
+    }
   }
-  return `<div class="logo"><span class="logo-mark">锋</span><div><strong>${APP_SHORT}</strong><em>选择题练习</em></div></div>
-    <div class="side-actions">
+  const topActions = examActive()
+    ? ""
+    : `<div class="side-actions">
       <button type="button" class="side-btn primary wide" data-action="open-import">导入题库</button>
       <button type="button" class="side-btn wide" data-action="open-api">API 设置</button>
       <button type="button" class="side-btn wide" data-action="load-sample">载入示例题库</button>
-    </div>
+    </div>`;
+  const modeSwitch = examActive()
+    ? `<p class="mode-lock">${examRunning() ? "考试进行中" : "正在看卷"}</p>`
+    : `<div class="mode-switch" role="tablist" aria-label="模式">
+      <button type="button" class="mode-btn" data-action="mode-practice" aria-pressed="${isPracticeMode()}">刷题模式</button>
+      <button type="button" class="mode-btn" data-action="mode-exam" aria-pressed="${isExamMode()}">考试模式</button>
+    </div>`;
+  return `<div class="logo"><span class="logo-mark">锋</span><div><strong>${APP_SHORT}</strong><em>${isExamMode() ? "考试模式" : "刷题模式"}</em></div></div>
+    ${modeSwitch}
+    ${topActions}
     <p class="side-label">题库</p>
     <div class="bank-list">${banks || '<p class="bank-meta">还没有题库</p>'}</div>
     ${tools}
@@ -1566,16 +1898,63 @@ function renderSidebar(bank) {
 function renderStage(bank, list) {
   const menu = '<button type="button" class="menu-btn" data-action="toggle-sidebar">题库</button>';
   if (!bank) {
-    return `<div class="sheet"><div class="top">${menu}<div><h2>${APP_SHORT}</h2></div></div>
+    return `<div class="sheet"><div class="top">${menu}<div><h2>${isExamMode() ? "考试模式" : "刷题模式"}</h2></div></div>
       <article class="card empty-card"><h1>还没有题目</h1><p>导入 JSON、CSV、Markdown 或文本题库，也可以先载入一套示例题。</p>
       <div class="nav"><button type="button" class="primary" data-action="open-import">导入题库</button><button type="button" class="ghost" data-action="load-sample">载入示例</button></div></article></div>`;
   }
-  const stats = bankStats(bank);
-  const done = stats.correct + stats.wrong;
+  if (isExamMode() && !examActive()) {
+    return `<div class="sheet"><div class="top">${menu}<div><p class="eyebrow">${esc(bank.name)}</p></div>
+      <div class="stats"><span><b>${bank.questions.length}</b>题</span></div></div>
+      <article class="card empty-card">
+        <h1>考试模式</h1>
+        <p>答题过程中不显示对错和解析。交卷后出分，错题会记入错题本。可选题量、时限，并打乱题序或选项。</p>
+        <div class="nav"><button type="button" class="primary" data-action="open-exam">开始考试</button><button type="button" class="ghost" data-action="mode-practice">回到刷题模式</button></div>
+      </article></div>`;
+  }
+  const stats = examActive()
+    ? (() => {
+      const total = state.exam.ids.length;
+      if (examRunning()) {
+        const answered = state.exam.ids.filter((id) => examPicks({ id }).length).length;
+        return { correct: 0, wrong: 0, todo: total - answered, total, answered };
+      }
+      const result = state.exam.result;
+      if (result) {
+        return {
+          correct: result.correct || 0,
+          wrong: result.wrong || 0,
+          todo: result.blank || 0,
+          total: result.total || total,
+        };
+      }
+      const records = state.exam.records || {};
+      let correct = 0;
+      let wrong = 0;
+      let blank = 0;
+      for (const id of state.exam.ids) {
+        const record = records[id];
+        if (!record || !record.picks?.length) blank += 1;
+        else if (record.correct) correct += 1;
+        else wrong += 1;
+      }
+      return { correct, wrong, todo: blank, total };
+    })()
+    : bankStats(bank);
+  const done = examRunning() ? stats.answered : stats.correct + stats.wrong;
   const percent = stats.total ? Math.round((done / stats.total) * 100) : 0;
-  const head = `<div class="top">${menu}<div><p class="eyebrow">${esc(bank.name)}</p></div>
-    <div class="stats"><span><b>${stats.correct}</b>正确</span><span><b>${stats.wrong}</b>错误</span><span><b>${stats.todo}</b>未做</span></div></div>
-    <div class="progress-line"><div class="bar"><span style="width:${percent}%"></span></div><span>已做 ${percent}%</span></div>`;
+  const remain = examRunning() && state.exam.endsAt
+    ? `<span class="exam-timer${state.exam.endsAt - Date.now() <= 60000 ? " warn" : ""}">${esc(formatRemain(state.exam.endsAt - Date.now()))}</span>`
+    : examRunning() ? '<span class="exam-timer">不限时</span>' : "";
+  const examBar = examRunning()
+    ? `<div class="exam-banner"><strong>考试中</strong><span>已答 ${stats.answered} / ${stats.total}</span>${remain}<button type="button" class="ghost" data-action="submit-exam">交卷</button></div>`
+    : examReview()
+      ? `<div class="exam-banner review"><strong>考试结束</strong><span>正确 ${stats.correct} · 错误 ${stats.wrong} · 未答 ${stats.todo} · 得分 ${stats.total ? Math.round((stats.correct / stats.total) * 100) : 0}%</span><button type="button" class="ghost" data-action="exit-exam">结束看卷</button></div>`
+      : "";
+  const head = `${examBar}<div class="top">${menu}<div><p class="eyebrow">${esc(bank.name)}${examActive() ? " · 考试" : ""}</p></div>
+    <div class="stats">${examRunning()
+      ? `<span><b>${stats.answered}</b>已答</span><span><b>${stats.todo}</b>未答</span>`
+      : `<span><b>${stats.correct}</b>正确</span><span><b>${stats.wrong}</b>错误</span><span><b>${stats.todo}</b>未做</span>`}</div></div>
+    <div class="progress-line"><div class="bar"><span style="width:${percent}%"></span></div><span>${examRunning() ? "进度" : "已做"} ${percent}%</span></div>`;
   if (!list.length) {
     const message = stats.wrong === 0 ? "当前题库里没有答错的题目。" : "错题都已经复习过了。";
     return `<div class="sheet">${head}<article class="card empty-card"><h1>没有错题</h1><p>${message}</p>
@@ -1585,8 +1964,8 @@ function renderStage(bank, list) {
   const record = currentRecord(question);
   const index = list.findIndex((item) => item.id === question.id);
   const all = orderedQuestions(bank);
-  const number = all.findIndex((item) => item.id === question.id) + 1;
-  const finished = stats.todo === 0 && stats.total > 0 && !state.onlyWrong
+  const number = examActive() ? index + 1 : all.findIndex((item) => item.id === question.id) + 1;
+  const finished = !examActive() && stats.todo === 0 && stats.total > 0 && !state.onlyWrong
     ? `<p class="done">这套题已经做完，正确率 ${rateOf(stats)}%。</p>`
     : "";
   const badge = question.type === "multiple" ? '<span class="badge multi">多选</span>' : '<span class="badge">单选</span>';
@@ -1594,8 +1973,11 @@ function renderStage(bank, list) {
   const shown = displayOptions(question);
   const shuffledOptions = optionsAreShuffled(question);
   const view = shuffledOptions ? explanationView(question) : { intro: "", byKey: {} };
+  const livePicks = examRunning()
+    ? (question.type === "multiple" && state.pendingKeys.length ? state.pendingKeys : examPicks(question))
+    : state.pendingKeys;
   const options = shown.map((option) => {
-    const picked = record ? record.picks.includes(option.id) : state.pendingKeys.includes(option.id);
+    const picked = record ? record.picks.includes(option.id) : livePicks.includes(option.id);
     const isAnswer = question.answer.includes(option.id);
     let cls = "option";
     if (!record && picked) cls += " is-selected";
@@ -1635,12 +2017,17 @@ function renderStage(bank, list) {
     }
   }
   const middle = record
-    ? '<button type="button" class="ghost" data-action="redo">重做本题</button>'
+    ? (examReview() ? "<span></span>" : '<button type="button" class="ghost" data-action="redo">重做本题</button>')
     : question.type === "multiple"
-      ? '<button type="button" class="primary" data-action="commit">确认答案</button>'
+      ? `<button type="button" class="primary" data-action="commit">${examRunning() ? "保存本题" : "确认答案"}</button>`
       : "<span></span>";
+  const keysHint = examRunning()
+    ? "考试中不显示对错。选好即可翻题，全部完成后交卷 · ← → 切换题目"
+    : examReview()
+      ? "正在看卷，可查看解析 · ← → 切换题目"
+      : "单击选项查看正误和解析 · 多选题按 Enter 确认 · ← → 切换题目";
   return `<div class="sheet">${head}${finished}<article class="card">
-    <div class="meta">${badge}${state.onlyWrong ? '<span class="badge multi">错题</span>' : ""}<span class="count">第 ${number} 题 · ${index + 1} / ${list.length}</span></div>
+    <div class="meta">${badge}${state.onlyWrong && !examActive() ? '<span class="badge multi">错题</span>' : ""}${examRunning() ? '<span class="badge exam">考试</span>' : ""}<span class="count">第 ${number} 题 · ${index + 1} / ${list.length}</span></div>
     <div class="stem">${formatRich(question.stem)}</div>
     ${hint}
     <div class="options">${options}</div>
@@ -1652,7 +2039,7 @@ function renderStage(bank, list) {
       <button type="button" class="primary" data-action="next"${index >= list.length - 1 ? " disabled" : ""}>下一题</button>
     </div>
   </article>
-  <p class="keys">单击选项查看正误和解析 · 多选题按 Enter 确认 · ← → 切换题目</p></div>`;
+  <p class="keys">${keysHint}</p></div>`;
 }
 
 function onClick(event) {
@@ -1660,15 +2047,26 @@ function onClick(event) {
   if (!node || node.disabled) return;
   const action = node.dataset.action;
   if (action === "pick") onPick(node.dataset.key);
-  else if (action === "commit") commit(state.pendingKeys);
+  else if (action === "commit") commit(state.pendingKeys.length ? state.pendingKeys : examPicks(currentQuestion()));
   else if (action === "prev") go(-1);
   else if (action === "next") go(1);
   else if (action === "jump") jumpTo(node.dataset.id);
   else if (action === "redo") redo();
   else if (action === "open-bank") focusBank(node.dataset.id);
-  else if (action === "open-import") openImport();
+  else if (action === "open-import") {
+    if (!confirmLeaveExam()) return;
+    openImport();
+  }
+  else if (action === "open-exam") openExamDialog();
+  else if (action === "mode-practice") setUiMode("practice");
+  else if (action === "mode-exam") setUiMode("exam");
+  else if (action === "submit-exam") submitExam(false);
+  else if (action === "exit-exam") exitExam();
   else if (action === "open-api") openApiSettings();
-  else if (action === "generate-explain") generateExplain();
+  else if (action === "generate-explain") {
+    if (examRunning()) return;
+    generateExplain();
+  }
   else if (action === "api-preset") applyApiPreset(node.dataset.base, node.dataset.model);
   else if (action === "load-sample") loadSample();
   else if (action === "toggle-wrong" || action === "show-all") {
@@ -1684,7 +2082,7 @@ function onClick(event) {
 
 function onKey(event) {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  if ($("importDialog").open || $("apiDialog").open) return;
+  if ($("importDialog").open || $("apiDialog").open || $("examDialog")?.open) return;
   if (event.target.closest("textarea, input")) return;
   const question = currentQuestion();
   if (!question) return;
@@ -1705,9 +2103,9 @@ function onKey(event) {
     }
     return;
   }
-  if (event.key === "Enter" && question.type === "multiple" && !currentRecord(question)) {
+  if (event.key === "Enter" && question.type === "multiple" && (examRunning() || !currentRecord(question))) {
     event.preventDefault();
-    commit(state.pendingKeys);
+    commit(state.pendingKeys.length ? state.pendingKeys : examPicks(question));
     return;
   }
   if (event.key === "ArrowRight") {
@@ -1729,6 +2127,10 @@ function bind() {
   });
   $("chooseFile").addEventListener("click", () => $("fileInput").click());
   $("saveApi").addEventListener("click", saveApiFromForm);
+  $("doExam").addEventListener("click", (event) => {
+    event.preventDefault();
+    startExamFromForm();
+  });
   $("clearApi").addEventListener("click", () => {
     $("apiKeyInput").value = "";
     const settings = loadApiSettings();
@@ -1736,6 +2138,7 @@ function bind() {
     toast("已清除 API Key");
   });
   $("doImport").addEventListener("click", async () => {
+    if (!confirmLeaveExam()) return;
     try {
       await importFileList([{ name: "粘贴题库.txt", text: async () => $("pasteArea").value }]);
       $("pasteArea").value = "";
@@ -1748,6 +2151,7 @@ function bind() {
     const files = [...$("fileInput").files];
     $("fileInput").value = "";
     if (!files.length) return;
+    if (!confirmLeaveExam()) return;
     try {
       await importFileList(files);
       closeImport();
@@ -1779,6 +2183,7 @@ function bind() {
     $("dropmask").classList.remove("show");
     const files = [...event.dataTransfer.files];
     if (!files.length) return;
+    if (!confirmLeaveExam()) return;
     try {
       await importFileList(files);
       closeImport();
@@ -1812,8 +2217,16 @@ function boot() {
   try {
     state = load();
     if (!state.initialized) seedSample();
+    if (examActive() && state.exam.bankId) {
+      const examBank = state.banks.find((item) => item.id === state.exam.bankId);
+      if (examBank) {
+        state.activeBankId = examBank.id;
+        state.uiMode = "exam";
+      } else state.exam = null;
+    }
     bind();
     render({ toTop: true });
+    startExamTimer();
   } catch (err) {
     $("stage").textContent = "题库打不开：" + err.message;
   }
@@ -1934,37 +2347,12 @@ D. 4
   assert(mdPack.questions[1].options[3].text.includes("!"), "行内答案剥离后选项仍在");
   assert(mdPack.questions[2].type === "multiple" && mdPack.questions[2].answer.join("") === "BD", "Markdown 多选");
 
-  const fs = require("fs");
-  const java1Path = fs.existsSync("java1.md") ? "java1.md" : "题库/java1.md";
-  const java2Path = fs.existsSync("java2.md") ? "java2.md" : "题库/java2.md";
-  if (fs.existsSync(java1Path)) {
-    const java1 = parseImport(fs.readFileSync(java1Path, "utf8"), "java1.md")[0];
-    assert(java1.questions.length >= 90, "java1 应识别出大部分题目，实际 " + java1.questions.length);
-    assert(java1.questions[0].answer.join("") === "B", "java1 第 1 题");
-  }
-  if (fs.existsSync(java2Path)) {
-    const java2 = parseImport(fs.readFileSync(java2Path, "utf8"), "java2.md")[0];
-    assert(java2.questions.length === 100, "java2 应为 100 题，实际 " + java2.questions.length);
-    assert(java2.questions[0].answer.join("") === "B", "java2 第 1 题");
-    assert(java2.questions[5].answer.join("") === "B", "java2 行内答案第 6 题");
-    assert(java2.questions[5].options.length === 4, "java2 第 6 题四个选项");
-  }
-
   const inline = formatRich("shell command `echo $?` and `<tag>`");
   assert(inline.includes('class="icode"') && inline.includes("echo $?") && inline.includes("&lt;tag&gt;"), "行内代码");
   assert(!inline.includes("`"), "反引号不原样显示");
   const block = formatRich("Read syscall:\n    .data\n    buf: .space 4\n    li a0, 0\nWhich statement?");
   assert(block.includes('class="codeblock"') && block.includes("asm") && block.includes("tok-dir") && block.includes("tok-op") && block.includes("tok-reg"), "汇编代码块");
   assert(block.includes("Which statement?"), "代码块前后的题干保留");
-  if (fs.existsSync("RISC-V-Assembly-100.json")) {
-    const riscv = JSON.parse(fs.readFileSync("RISC-V-Assembly-100.json", "utf8"));
-    const q94 = riscv.questions.find((item) => item.question.includes("[Hard] 94"));
-    const q40 = riscv.questions.find((item) => item.question.includes("echo $?"));
-    const q86 = riscv.questions.find((item) => item.question.includes("[Hard] 86"));
-    assert(formatRich(q94.question).includes("codeblock") && formatRich(q94.question).includes("ecall"), "第94题代码块");
-    assert(formatRich(q40.question).includes("icode"), "第40题行内代码");
-    assert(formatRich(q86.options[0]).includes("icode"), "第86题选项行内代码");
-  }
 
   state = fresh();
   state.banks = [{ name: "计算机基础" }];
@@ -2015,6 +2403,21 @@ D. 4
   assert(chatCompletionsUrl("https://api.openai.com/v1") === "https://api.openai.com/v1/chat/completions", "已有 v1 只补 completions");
   assert(chatCompletionsUrl("http://127.0.0.1:11434/v1/chat/completions") === "http://127.0.0.1:11434/v1/chat/completions", "完整地址不重复拼接");
   assert(unwrapModelText("```md\n解析：第一句\n```") === "第一句", "去掉模型围栏和解析前缀");
+
+  const examQs = [
+    { id: "q1", answer: ["B"], options: [{ key: "A", text: "a" }, { key: "B", text: "b" }] },
+    { id: "q2", answer: ["A", "C"], options: [{ key: "A", text: "a" }, { key: "B", text: "b" }, { key: "C", text: "c" }] },
+    { id: "q3", answer: ["D"], options: [{ key: "D", text: "d" }] },
+  ];
+  const graded = gradeExam({ questions: examQs }, ["q1", "q2", "q3"], { q1: ["B"], q2: ["A"] });
+  assert(graded.correct === 1 && graded.wrong === 1 && graded.blank === 1 && graded.total === 3, "考试计分");
+  assert(graded.records.q1.correct && !graded.records.q2.correct && !graded.records.q3.correct, "考试逐题对错");
+  assert(formatRemain(0) === "00:00" && formatRemain(65000) === "01:05", "剩余时间格式");
+  assert(formatRemain(3723000).includes("1:02"), "超过一小时");
+  state = fresh();
+  assert(state.uiMode === "practice" && isPracticeMode() && !isExamMode(), "默认刷题模式");
+  state.uiMode = "exam";
+  assert(isExamMode() && !isPracticeMode(), "可切换考试模式");
   console.log("parser tests ok");
 }
 

@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>前锋刷题软件</title>
-  <meta name="description" content="前锋刷题软件：解压即用的 Windows 选择题练习。导入 JSON / Markdown，错题本，可打乱选项。不用注册，数据只在本机。" />
+  <meta name="description" content="前锋刷题软件：解压即用的 Windows 选择题练习。刷题或考试模式，导入 JSON / Markdown，错题本，可打乱选项。不用注册，数据只在本机。" />
   <meta property="og:title" content="前锋刷题软件 / Qianfeng Shuati" />
-  <meta property="og:description" content="解压即用的 Windows 选择题练习。不用注册，数据只在本机。" />
+  <meta property="og:description" content="解压即用的 Windows 选择题练习。刷题即时出解，考试交卷出分。不用注册，数据只在本机。" />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="docs/social-preview.png" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -90,6 +90,36 @@ B. 选项
       <div class="dialog-foot">
         <button type="button" class="ghost" id="clearApi">清除 Key</button>
         <button type="button" class="primary" id="saveApi">保存</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="examDialog" aria-labelledby="examTitle">
+    <form class="dialog-body" method="dialog">
+      <div class="dialog-head">
+        <h2 id="examTitle">开始考试</h2>
+        <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
+      </div>
+      <p class="muted">答题过程中不显示对错和解析。交卷后出分，错题会记入错题本。</p>
+      <label class="field">题量
+        <input id="examCountInput" type="number" min="1" step="1" />
+      </label>
+      <label class="field">时限
+        <select id="examDurationInput">
+          <option value="0">不限时</option>
+          <option value="15">15 分钟</option>
+          <option value="30" selected>30 分钟</option>
+          <option value="45">45 分钟</option>
+          <option value="60">60 分钟</option>
+          <option value="90">90 分钟</option>
+          <option value="120">120 分钟</option>
+        </select>
+      </label>
+      <label class="check"><input id="examShuffleQ" type="checkbox" checked /> 打乱题序</label>
+      <label class="check"><input id="examShuffleO" type="checkbox" checked /> 打乱选项</label>
+      <p id="examError" class="form-error"></p>
+      <div class="dialog-foot">
+        <button type="submit" class="ghost" value="cancel">取消</button>
+        <button type="button" class="primary" id="doExam">开始考试</button>
       </div>
     </form>
   </dialog>
