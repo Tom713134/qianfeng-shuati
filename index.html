@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>前锋刷题软件</title>
-  <meta name="description" content="前锋刷题软件：解压即用的 Windows 选择题练习。刷题或考试模式，导入 JSON / Markdown，错题本，可打乱选项。不用注册，数据只在本机。" />
+  <meta name="description" content="前锋刷题软件：解压即用的 Windows 选择题练习。刷题或考试模式，搜索与收藏，成绩档案，导入 JSON / Markdown。不用注册，数据只在本机。" />
   <meta property="og:title" content="前锋刷题软件 / Qianfeng Shuati" />
-  <meta property="og:description" content="解压即用的 Windows 选择题练习。刷题即时出解，考试交卷出分。不用注册，数据只在本机。" />
+  <meta property="og:description" content="解压即用的 Windows 选择题练习。刷题即时出解，考试交卷出分，可备份进度。不用注册，数据只在本机。" />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="docs/social-preview.png" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -22,8 +22,13 @@
   <div id="scrim" class="scrim"></div>
   <div id="dropmask" class="dropmask">松开即可导入题库</div>
   <div id="toast" class="toast" role="status"></div>
+  <div id="ctxMenu" class="ctx-menu" hidden role="menu">
+    <button type="button" role="menuitem" data-ctx="open">查看试卷</button>
+    <button type="button" role="menuitem" class="danger" data-ctx="delete">删除成绩</button>
+  </div>
   <div id="live" class="sr" aria-live="polite"></div>
   <input id="fileInput" type="file" hidden accept=".json,.txt,.md,.csv,.tsv,text/plain,text/markdown,application/json" multiple />
+  <input id="backupInput" type="file" hidden accept=".json,application/json" />
 
   <dialog id="importDialog" aria-labelledby="importTitle">
     <form class="dialog-body" method="dialog">
@@ -31,7 +36,7 @@
         <h2 id="importTitle">导入题库</h2>
         <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
       </div>
-      <p class="muted">支持 JSON、CSV、Markdown 和文本。导入后保存在这台电脑的浏览器里。</p>
+      <p class="muted">支持 JSON、CSV、Markdown 和文本，也可以导入本软件导出的备份文件。导入后保存在这台电脑的浏览器里。</p>
       <textarea id="pasteArea" spellcheck="false" placeholder="把题目粘贴到这里，或选择文件"></textarea>
       <details>
         <summary>查看格式说明</summary>
@@ -120,6 +125,35 @@ B. 选项
       <div class="dialog-foot">
         <button type="submit" class="ghost" value="cancel">取消</button>
         <button type="button" class="primary" id="doExam">开始考试</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="exportDialog" aria-labelledby="exportTitle">
+    <form class="dialog-body" method="dialog">
+      <div class="dialog-head">
+        <h2 id="exportTitle">导出</h2>
+        <button type="submit" class="icon-x" value="cancel" aria-label="关闭">×</button>
+      </div>
+      <p class="muted">先选导出哪些，再选保存位置。</p>
+      <p class="side-label-plain">导出哪些</p>
+      <label class="check"><input id="exportPresetAll" type="checkbox" /> 完整备份（题库、记录、成绩、收藏）</label>
+      <fieldset class="export-scope">
+        <legend>题目范围</legend>
+        <label class="check"><input name="exportScope" type="radio" value="current" checked /> 当前题库</label>
+        <label class="check"><input name="exportScope" type="radio" value="all" /> 全部题库</label>
+        <label class="check"><input id="exportIncludeBanks" type="checkbox" checked /> 题目内容</label>
+      </fieldset>
+      <label class="check"><input id="exportRecords" type="checkbox" /> 做题记录</label>
+      <label class="check"><input id="exportHistory" type="checkbox" /> 考试成绩</label>
+      <label class="check"><input id="exportFlags" type="checkbox" /> 收藏标记</label>
+      <p class="side-label-plain">保存位置</p>
+      <label class="check"><input name="exportWhere" type="radio" value="picker" id="exportWherePicker" checked /> 选择文件保存位置</label>
+      <label class="check"><input name="exportWhere" type="radio" value="download" /> 保存到浏览器默认下载文件夹</label>
+      <p id="exportHint" class="muted"></p>
+      <p id="exportError" class="form-error"></p>
+      <div class="dialog-foot">
+        <button type="submit" class="ghost" value="cancel">取消</button>
+        <button type="button" class="primary" id="doExport">导出</button>
       </div>
     </form>
   </dialog>

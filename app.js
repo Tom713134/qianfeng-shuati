@@ -4,6 +4,7 @@ const APP_NAME = "前锋刷题软件";
 const APP_SHORT = "前锋刷题";
 const STORAGE_KEY = "shuati.v1";
 const API_STORE_KEY = "shuati.api.v1";
+const BACKUP_KIND = "qianfeng-shuati-backup";
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const API_PRESETS = [
   { name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
@@ -102,6 +103,7 @@ let toastTimer = 0;
 let examTimer = 0;
 let dragDepth = 0;
 let explainingId = "";
+let ctxScoreId = null;
 
 function fresh() {
   return {
@@ -114,7 +116,12 @@ function fresh() {
     optionOrder: {},
     records: {},
     exam: null,
+    examHistory: [],
+    flags: { star: {}, unsure: {} },
     uiMode: "practice",
+    filter: "all",
+    searchQuery: "",
+    panel: null,
     pendingKeys: [],
     pinId: null,
   };
@@ -869,7 +876,12 @@ function load() {
       optionOrder: raw.optionOrder && typeof raw.optionOrder === "object" ? raw.optionOrder : {},
       records: raw.records && typeof raw.records === "object" ? raw.records : {},
       exam: sanitizeExam(raw.exam),
+      examHistory: sanitizeExamHistory(raw.examHistory),
+      flags: sanitizeFlags(raw.flags),
       uiMode: raw.uiMode === "exam" ? "exam" : "practice",
+      filter: ["wrong", "star"].includes(raw.filter) ? raw.filter : (raw.onlyWrong ? "wrong" : "all"),
+      searchQuery: "",
+      panel: null,
       pendingKeys: [],
       pinId: null,
     };
@@ -884,12 +896,15 @@ function save() {
     banks: state.banks,
     activeBankId: state.activeBankId,
     currentId: state.currentId,
-    onlyWrong: state.onlyWrong,
+    onlyWrong: (state.filter || "all") === "wrong",
     order: state.order,
     optionOrder: state.optionOrder,
     records: state.records,
     exam: state.exam,
+    examHistory: state.examHistory,
+    flags: state.flags,
     uiMode: state.uiMode === "exam" ? "exam" : "practice",
+    filter: state.filter || "all",
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
@@ -1004,7 +1019,7 @@ async function requestChat(settings, messages) {
     messages,
     temperature: 0.3,
   });
-  const useProxy = isLocalServer();
+  const useProxy = location.protocol !== "file:" && location.hostname === "127.0.0.1";
   const headers = { "Content-Type": "application/json" };
   if (!useProxy && settings.apiKey) headers.Authorization = "Bearer " + settings.apiKey;
   const res = await fetch(useProxy ? "/api/complete" : url, {
@@ -1101,10 +1116,18 @@ function visibleQuestions() {
     const map = new Map(bank.questions.map((question) => [question.id, question]));
     return state.exam.ids.map((id) => map.get(id)).filter(Boolean);
   }
-  const questions = orderedQuestions(bank);
-  if (!state.onlyWrong) return questions;
-  const records = state.records[bank.id] || {};
-  return questions.filter((question) => question.id === state.pinId || (records[question.id] && records[question.id].correct === false));
+  let questions = orderedQuestions(bank);
+  const filter = state.filter || "all";
+  if (filter === "wrong") {
+    const records = state.records[bank.id] || {};
+    questions = questions.filter((question) => question.id === state.pinId || (records[question.id] && records[question.id].correct === false));
+  } else if (filter === "star") {
+    questions = questions.filter((question) => question.id === state.pinId || isFlagged("star", bank.id, question.id));
+  } else if (filter === "unsure") {
+    questions = questions.filter((question) => question.id === state.pinId || isFlagged("unsure", bank.id, question.id));
+  }
+  if (state.searchQuery) questions = questions.filter((question) => matchesSearch(question, state.searchQuery));
+  return questions;
 }
 
 function bankStats(bank) {
@@ -1267,6 +1290,134 @@ function sanitizeExam(raw) {
   };
 }
 
+function sanitizeFlagMap(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+  for (const [bankId, value] of Object.entries(raw)) {
+    if (!value || typeof value !== "object") continue;
+    const inner = {};
+    for (const [qid, on] of Object.entries(value)) if (on) inner[qid] = true;
+    if (Object.keys(inner).length) out[bankId] = inner;
+  }
+  return out;
+}
+
+function sanitizeFlags(raw) {
+  return {
+    star: sanitizeFlagMap(raw && raw.star),
+    unsure: sanitizeFlagMap(raw && raw.unsure),
+  };
+}
+
+function sanitizeExamHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 50).map((item) => {
+    if (!item || typeof item !== "object" || !Array.isArray(item.ids)) return null;
+    return {
+      id: String(item.id || uid()),
+      bankId: String(item.bankId || ""),
+      bankName: String(item.bankName || "题库"),
+      startedAt: Number(item.startedAt) || Date.now(),
+      submittedAt: Number(item.submittedAt) || Date.now(),
+      durationMs: Number(item.durationMs) || 0,
+      auto: Boolean(item.auto),
+      ids: item.ids.map(String),
+      answers: item.answers && typeof item.answers === "object" ? item.answers : {},
+      records: item.records && typeof item.records === "object" ? item.records : {},
+      optionOrder: item.optionOrder && typeof item.optionOrder === "object" ? item.optionOrder : {},
+      correct: Number(item.correct) || 0,
+      wrong: Number(item.wrong) || 0,
+      blank: Number(item.blank) || 0,
+      total: Number(item.total) || item.ids.length,
+      score: Number(item.score) || 0,
+    };
+  }).filter(Boolean);
+}
+
+function isFlagged(kind, bankId, questionId) {
+  return Boolean(state.flags?.[kind]?.[bankId]?.[questionId]);
+}
+
+function toggleFlag(kind, bankId, questionId) {
+  if (!bankId || !questionId) return;
+  if (!state.flags[kind]) state.flags[kind] = {};
+  if (!state.flags[kind][bankId]) state.flags[kind][bankId] = {};
+  if (state.flags[kind][bankId][questionId]) delete state.flags[kind][bankId][questionId];
+  else state.flags[kind][bankId][questionId] = true;
+}
+
+function questionHaystack(question) {
+  return [
+    question.stem,
+    question.explanation,
+    ...((question.options || []).map((option) => option.text)),
+  ].join("\n").toLowerCase();
+}
+
+function matchesSearch(question, query) {
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return true;
+  return questionHaystack(question).includes(needle);
+}
+
+function formatWhen(ts) {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "—";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function publicBank(bank) {
+  return {
+    name: bank.name,
+    questions: (bank.questions || []).map((question) => ({
+      question: question.stem,
+      options: question.options.map((option) => ({ key: option.key, text: option.text })),
+      answer: question.answer.join(""),
+      explanation: question.explanation,
+      type: question.type,
+    })),
+  };
+}
+
+function serializeBank(bank) {
+  return {
+    id: bank.id,
+    name: bank.name,
+    questions: (bank.questions || []).map((question) => ({
+      id: question.id,
+      stem: question.stem,
+      options: (question.options || []).map((option) => ({ key: option.key, text: option.text })),
+      answer: Array.isArray(question.answer) ? question.answer : [],
+      explanation: question.explanation || "",
+      type: question.type,
+    })),
+  };
+}
+
+function hydrateBank(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const list = Array.isArray(raw.questions) ? raw.questions : [];
+  const internal = list.length && list.every((item) => item && typeof item.stem === "string" && item.id && Array.isArray(item.options));
+  if (internal) {
+    return {
+      id: String(raw.id || uid()),
+      name: String(raw.name || "备份题库"),
+      questions: list.map((item) => ({
+        id: String(item.id),
+        stem: item.stem,
+        options: item.options,
+        answer: Array.isArray(item.answer) ? item.answer.map(String) : String(item.answer || "").split("").filter(Boolean),
+        explanation: String(item.explanation || ""),
+        type: item.type === "multiple" ? "multiple" : "single",
+      })),
+    };
+  }
+  const pack = parseJsonBank(raw, raw.name || "备份.json");
+  if (!pack.questions.length) return null;
+  return { id: raw.id ? String(raw.id) : uid(), name: pack.name, questions: pack.questions };
+}
+
 function examActive() {
   return Boolean(state.exam && (state.exam.status === "running" || state.exam.status === "review"));
 }
@@ -1297,7 +1448,8 @@ function setUiMode(mode) {
     }
   }
   state.uiMode = next;
-  if (next === "exam") state.onlyWrong = false;
+  if (next === "exam") state.filter = "all";
+  state.panel = null;
   save();
   render({ toTop: true });
 }
@@ -1475,6 +1627,7 @@ function submitExam(auto = false) {
   state.exam.auto = Boolean(auto);
   if (!state.records[bank.id]) state.records[bank.id] = {};
   Object.assign(state.records[bank.id], result.records);
+  archiveExam(bank, result);
   state.pendingKeys = [];
   save();
   stopExamTimer();
@@ -1519,6 +1672,7 @@ function focusBank(id) {
   state.onlyWrong = false;
   state.pendingKeys = [];
   state.pinId = null;
+  state.panel = null;
   save();
   render({ toTop: true });
   closeSidebar();
@@ -1538,10 +1692,32 @@ function pushBank(pack) {
 async function importFileList(files) {
   const errors = [];
   const before = state.banks.length;
+  let restored = 0;
   for (const file of files) {
+    let text;
+    try {
+      text = await file.text();
+    } catch (err) {
+      errors.push(`${file.name}：读不了这个文件`);
+      continue;
+    }
+    const trimmed = String(text || "").replace(/^\uFEFF/, "").trim();
+    if (trimmed.startsWith("{")) {
+      let data = null;
+      try {
+        data = JSON.parse(trimmed);
+      } catch (err) {
+        data = null;
+      }
+      if (data && data.kind === BACKUP_KIND) {
+        restoreBackup(data);
+        restored += 1;
+        continue;
+      }
+    }
     let packs;
     try {
-      packs = parseImport(await file.text(), file.name);
+      packs = parseImport(text, file.name);
     } catch (err) {
       errors.push(`${file.name}：${err.message}`);
       continue;
@@ -1554,6 +1730,11 @@ async function importFileList(files) {
     ok.forEach((pack) => pushBank(pack));
   }
   const added = state.banks.slice(before);
+  if (restored && !added.length) {
+    toast(errors.length ? `已导入备份，另有 ${errors.length} 个文件失败` : "已导入备份，题库和进度已合并");
+    render({ toTop: true });
+    return;
+  }
   if (!added.length) throw new Error(errors.join("\n") || "没有识别到完整题目。每题需要题干、至少两个选项，以及答案。");
   const count = added.reduce((sum, bank) => sum + bank.questions.length, 0);
   focusBank(added[0].id);
@@ -1670,12 +1851,17 @@ function redo() {
   render();
 }
 
-function toggleWrong() {
-  state.onlyWrong = !state.onlyWrong;
+function setFilter(next) {
+  state.filter = state.filter === next ? "all" : next;
   state.pinId = null;
   state.pendingKeys = [];
+  state.panel = null;
   save();
   render({ toTop: true });
+}
+
+function toggleWrong() {
+  setFilter("wrong");
 }
 
 function shuffleQuestions() {
@@ -1755,6 +1941,8 @@ function deleteBank() {
   delete state.records[bank.id];
   delete state.order[bank.id];
   delete state.optionOrder[bank.id];
+  if (state.flags.star) delete state.flags.star[bank.id];
+  if (state.flags.unsure) delete state.flags.unsure[bank.id];
   const next = state.banks[0];
   state.activeBankId = next?.id || null;
   state.currentId = next?.questions[0]?.id || null;
@@ -1764,26 +1952,317 @@ function deleteBank() {
   render({ toTop: true });
 }
 
-function exportBank() {
-  const bank = getBank();
-  if (!bank) return;
-  const data = {
-    name: bank.name,
-    questions: bank.questions.map((question) => ({
-      question: question.stem,
-      options: question.options.map((option) => ({ key: option.key, text: option.text })),
-      answer: question.answer.join(""),
-      explanation: question.explanation,
-      type: question.type,
-    })),
-  };
+function canPickSavePath() {
+  return typeof window !== "undefined" && typeof window.showSaveFilePicker === "function";
+}
+
+function safeFileName(name, fallback = "导出") {
+  return String(name || fallback).replace(/[<>:"/\\|?*]/g, " ").trim() || fallback;
+}
+
+function downloadJson(filename, data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
-  const clean = bank.name.replace(/[<>:"/\\|?*]/g, " ").trim() || "题库";
   link.href = URL.createObjectURL(blob);
-  link.download = `${clean}.json`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(link.href);
+}
+
+async function writeJsonFile(filename, data, where) {
+  if (where === "picker" && canPickSavePath()) {
+    const handle = await window.showSaveFilePicker({
+      suggestedName: filename,
+      types: [{ description: "JSON", accept: { "application/json": [".json"] } }],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(JSON.stringify(data, null, 2));
+    await writable.close();
+    return "picked";
+  }
+  downloadJson(filename, data);
+  return "download";
+}
+
+function selectedBanks(scope) {
+  if (scope === "all") return state.banks;
+  const bank = getBank();
+  return bank ? [bank] : [];
+}
+
+function buildExportPayload(options) {
+  const banks = selectedBanks(options.scope);
+  const bankIds = new Set(banks.map((bank) => bank.id));
+  const pickRecords = {};
+  const pickOrder = {};
+  const pickOptionOrder = {};
+  const pickFlags = { star: {}, unsure: {} };
+  for (const bank of banks) {
+    if (options.records && state.records[bank.id]) pickRecords[bank.id] = state.records[bank.id];
+    if (options.records && state.order[bank.id]) pickOrder[bank.id] = state.order[bank.id];
+    if (options.records && state.optionOrder[bank.id]) pickOptionOrder[bank.id] = state.optionOrder[bank.id];
+    if (options.flags) {
+      if (state.flags.star?.[bank.id]) pickFlags.star[bank.id] = state.flags.star[bank.id];
+      if (state.flags.unsure?.[bank.id]) pickFlags.unsure[bank.id] = state.flags.unsure[bank.id];
+    }
+  }
+  const history = options.history
+    ? state.examHistory.filter((item) => options.scope === "all" || bankIds.has(item.bankId))
+    : [];
+  const extra = options.records || options.history || options.flags;
+  if (!options.banks && !extra) throw new Error("请至少选择一项要导出的内容");
+  if (!extra && options.banks && options.scope === "current") {
+    if (!banks[0]) throw new Error("请先选择一套题库");
+    return {
+      filename: `${safeFileName(banks[0].name)}.json`,
+      data: publicBank(banks[0]),
+    };
+  }
+  if (!extra && options.banks && options.scope === "all") {
+    return {
+      filename: "前锋刷题-题库.json",
+      data: banks.map(publicBank),
+    };
+  }
+  return {
+    filename: options.banks && extra ? "前锋刷题-备份.json" : "前锋刷题-进度.json",
+    data: {
+      kind: BACKUP_KIND,
+      version: 1,
+      exportedAt: Date.now(),
+      banks: options.banks ? banks.map(serializeBank) : undefined,
+      records: options.records ? pickRecords : undefined,
+      order: options.records ? pickOrder : undefined,
+      optionOrder: options.records ? pickOptionOrder : undefined,
+      examHistory: options.history ? history : undefined,
+      flags: options.flags ? pickFlags : undefined,
+    },
+  };
+}
+
+function restoreBackup(data) {
+  if (!confirm("检测到备份文件。将把其中的题库、记录、成绩和收藏合并进当前数据。继续？")) {
+    throw new Error("已取消导入备份");
+  }
+  const idMap = new Map(state.banks.map((bank) => [bank.id, bank]));
+  for (const raw of data.banks || []) {
+    const pack = hydrateBank(raw);
+    if (!pack || !pack.questions.length) continue;
+    const existing = pack.id && idMap.get(pack.id);
+    if (existing) {
+      existing.questions = pack.questions;
+      existing.name = pack.name || existing.name;
+    } else {
+      const bank = pushBank(pack);
+      bank.id = pack.id;
+      idMap.set(bank.id, bank);
+    }
+  }
+  if (data.records && typeof data.records === "object") {
+    for (const [bankId, records] of Object.entries(data.records)) {
+      state.records[bankId] = { ...(state.records[bankId] || {}), ...(records || {}) };
+    }
+  }
+  if (data.order && typeof data.order === "object") state.order = { ...state.order, ...data.order };
+  if (data.optionOrder && typeof data.optionOrder === "object") {
+    state.optionOrder = { ...state.optionOrder, ...data.optionOrder };
+  }
+  if (Array.isArray(data.examHistory)) {
+    const seen = new Set(state.examHistory.map((item) => item.id));
+    for (const item of sanitizeExamHistory(data.examHistory)) {
+      if (!seen.has(item.id)) state.examHistory.push(item);
+    }
+    state.examHistory.sort((a, b) => b.submittedAt - a.submittedAt);
+    state.examHistory = state.examHistory.slice(0, 50);
+  }
+  if (data.flags) {
+    const incoming = sanitizeFlags(data.flags);
+    for (const kind of ["star", "unsure"]) {
+      for (const [bankId, map] of Object.entries(incoming[kind] || {})) {
+        state.flags[kind][bankId] = { ...(state.flags[kind][bankId] || {}), ...map };
+      }
+    }
+  }
+  save();
+}
+
+function archiveExam(bank, result) {
+  const score = result.total ? Math.round((result.correct / result.total) * 100) : 0;
+  state.examHistory.unshift({
+    id: uid(),
+    bankId: bank.id,
+    bankName: bank.name,
+    startedAt: state.exam.startedAt,
+    submittedAt: Date.now(),
+    durationMs: Math.max(0, Date.now() - (state.exam.startedAt || Date.now())),
+    auto: Boolean(state.exam.auto),
+    ids: [...state.exam.ids],
+    answers: { ...(state.exam.answers || {}) },
+    records: result.records,
+    optionOrder: state.exam.optionOrder || {},
+    correct: result.correct,
+    wrong: result.wrong,
+    blank: result.blank,
+    total: result.total,
+    score,
+  });
+  state.examHistory = state.examHistory.slice(0, 50);
+}
+
+function openHistory() {
+  if (!confirmLeaveExam()) return;
+  if (examReview()) {
+    state.exam = null;
+    stopExamTimer();
+  }
+  state.uiMode = "exam";
+  state.panel = "history";
+  save();
+  render({ toTop: true });
+  closeSidebar();
+}
+
+function removeExamScore(id) {
+  const before = (state.examHistory || []).length;
+  state.examHistory = (state.examHistory || []).filter((entry) => entry.id !== id);
+  return before !== state.examHistory.length;
+}
+
+function deleteScore(id) {
+  const item = (state.examHistory || []).find((entry) => entry.id === id);
+  if (!item) return;
+  if (!confirm(`删除「${item.bankName}」这次 ${item.score}% 的成绩？`)) return;
+  removeExamScore(id);
+  save();
+  render();
+  toast("已删除这条成绩");
+}
+
+function clearScores() {
+  if (!(state.examHistory || []).length) return;
+  if (!confirm("清空全部考试成绩？看卷记录也会去掉。")) return;
+  state.examHistory = [];
+  save();
+  render();
+  toast("成绩已清空");
+}
+
+function historyRowHtml(item, compact = false) {
+  const missing = !state.banks.some((bank) => bank.id === item.bankId);
+  const detail = compact
+    ? `${esc(formatWhen(item.submittedAt))}${missing ? " · 题库已删" : ""}`
+    : `${esc(formatWhen(item.submittedAt))} · ${item.correct}/${item.total} 对 · 用时 ${esc(formatRemain(item.durationMs))}${item.auto ? " · 到时交卷" : ""}${missing ? " · 题库已删" : ""}`;
+  return `<button type="button" class="history-item${compact ? " compact" : ""}${missing ? " missing" : ""}" data-action="open-archive" data-id="${esc(item.id)}">
+      <span class="history-score">${item.score}%</span>
+      <span class="history-main">
+        <strong>${esc(item.bankName)}</strong>
+        <em>${detail}</em>
+      </span>
+    </button>`;
+}
+
+function hideCtxMenu() {
+  ctxScoreId = null;
+  const menu = $("ctxMenu");
+  if (menu) menu.hidden = true;
+}
+
+function showScoreCtxMenu(event, itemNode) {
+  const id = itemNode.dataset.id;
+  const item = (state.examHistory || []).find((entry) => entry.id === id);
+  if (!item) return;
+  event.preventDefault();
+  ctxScoreId = id;
+  const missing = !state.banks.some((bank) => bank.id === item.bankId);
+  const menu = $("ctxMenu");
+  const openBtn = menu.querySelector('[data-ctx="open"]');
+  if (openBtn) openBtn.disabled = missing;
+  menu.hidden = false;
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const rect = menu.getBoundingClientRect();
+  const x = Math.min(event.clientX, window.innerWidth - rect.width - 8);
+  const y = Math.min(event.clientY, window.innerHeight - rect.height - 8);
+  menu.style.left = `${Math.max(8, x)}px`;
+  menu.style.top = `${Math.max(8, y)}px`;
+}
+
+function openArchivedExam(id) {
+  const item = state.examHistory.find((entry) => entry.id === id);
+  if (!item) return;
+  const bank = state.banks.find((entry) => entry.id === item.bankId);
+  if (!bank) {
+    toast("对应题库已删除，无法看卷");
+    return;
+  }
+  const ids = item.ids.filter((qid) => bank.questions.some((question) => question.id === qid));
+  if (!ids.length) {
+    toast("这套成绩里的题目已经不在题库中");
+    return;
+  }
+  state.uiMode = "exam";
+  state.panel = null;
+  state.activeBankId = bank.id;
+  state.exam = {
+    bankId: bank.id,
+    ids,
+    answers: item.answers || {},
+    optionOrder: item.optionOrder || {},
+    startedAt: item.startedAt,
+    endsAt: null,
+    status: "review",
+    records: item.records || {},
+    result: {
+      correct: item.correct,
+      wrong: item.wrong,
+      blank: item.blank,
+      total: item.total,
+    },
+    auto: item.auto,
+  };
+  state.currentId = ids[0];
+  save();
+  render({ toTop: true });
+}
+
+function openExportDialog() {
+  $("exportError").textContent = "";
+  const picker = canPickSavePath();
+  $("exportWherePicker").disabled = !picker;
+  $("exportHint").textContent = picker
+    ? "选择文件保存位置时，可以指定文件夹和文件名。"
+    : "当前窗口不支持自选路径，将保存到浏览器默认下载文件夹。";
+  if (!picker) {
+    const download = document.querySelector('input[name="exportWhere"][value="download"]');
+    if (download) download.checked = true;
+  }
+  $("exportDialog").showModal();
+}
+
+function syncExportPreset() {
+  const all = $("exportIncludeBanks").checked && $("exportRecords").checked && $("exportHistory").checked && $("exportFlags").checked
+    && document.querySelector('input[name="exportScope"][value="all"]')?.checked;
+  $("exportPresetAll").checked = Boolean(all);
+}
+
+async function confirmExport() {
+  $("exportError").textContent = "";
+  try {
+    const payload = buildExportPayload({
+      scope: document.querySelector('input[name="exportScope"]:checked')?.value || "current",
+      banks: $("exportIncludeBanks").checked,
+      records: $("exportRecords").checked,
+      history: $("exportHistory").checked,
+      flags: $("exportFlags").checked,
+    });
+    const where = document.querySelector('input[name="exportWhere"]:checked')?.value || "download";
+    const saved = await writeJsonFile(payload.filename, payload.data, where);
+    if ($("exportDialog").open) $("exportDialog").close();
+    toast(saved === "picked" ? "已保存到所选位置" : `已开始下载 ${payload.filename}`);
+  } catch (err) {
+    if (err && err.name === "AbortError") return;
+    $("exportError").textContent = err.message || "导出失败";
+  }
 }
 
 function openImport() {
@@ -1798,9 +2277,10 @@ function closeImport() {
 }
 
 function render(options = {}) {
+  hideCtxMenu();
   const bank = getBank();
   if (bank && bank.id !== state.activeBankId) state.activeBankId = bank.id;
-  const list = bank ? visibleQuestions() : [];
+  const list = bank && state.panel !== "history" ? visibleQuestions() : [];
   if (bank && list.length && !list.some((question) => question.id === state.currentId)) {
     state.currentId = list[0].id;
   }
@@ -1811,6 +2291,14 @@ function render(options = {}) {
   $("stage").innerHTML = renderStage(bank, list);
   if (options.toTop) window.scrollTo(0, 0);
   if (options.focusVerdict) document.querySelector(".verdict")?.scrollIntoView({ block: "nearest" });
+  if (options.keepSearch) {
+    const input = $("bankSearch");
+    if (input) {
+      input.focus();
+      const pos = Number(options.searchPos);
+      if (Number.isFinite(pos)) input.setSelectionRange(pos, pos);
+    }
+  }
 }
 
 function renderSidebar(bank) {
@@ -1839,7 +2327,8 @@ function renderSidebar(bank) {
         status = record ? (record.correct ? "correct" : "wrong") : "todo";
       }
       const current = question.id === state.currentId ? " current" : "";
-      return `<button type="button" class="qdot ${status}${current}" data-action="jump" data-id="${esc(question.id)}" title="${esc(question.stem)}" aria-label="第 ${number} 题"${question.id === state.currentId ? ' aria-current="true"' : ""}>${number}</button>`;
+      const starred = !examActive() && isFlagged("star", bank.id, question.id) ? " starred" : "";
+      return `<button type="button" class="qdot ${status}${current}${starred}" data-action="jump" data-id="${esc(question.id)}" title="${esc(question.stem)}" aria-label="第 ${number} 题"${question.id === state.currentId ? ' aria-current="true"' : ""}>${number}</button>`;
     }).join("");
     if (examRunning()) {
       tools = `<div class="side-actions">
@@ -1856,17 +2345,23 @@ function renderSidebar(bank) {
     } else if (isExamMode()) {
       tools = `<div class="side-actions">
         <button type="button" class="side-btn primary wide" data-action="open-exam">开始考试</button>
-        <button type="button" class="side-btn" data-action="export">导出题库</button>
-        <button type="button" class="side-btn" data-action="delete">删除本题库</button>
+        <button type="button" class="side-btn" data-action="open-history">成绩档案</button>
+        <button type="button" class="side-btn" data-action="export">导出</button>
+        <button type="button" class="side-btn wide" data-action="delete">删除本题库</button>
       </div>`;
     } else {
+      const filter = state.filter || "all";
       tools = `<div class="side-actions">
-        <button type="button" class="side-btn" data-action="export">导出题库</button>
-        <button type="button" class="side-btn" data-action="toggle-wrong" aria-pressed="${state.onlyWrong}">${state.onlyWrong ? "查看全部" : "只看错题"}</button>
+        <button type="button" class="side-btn" data-action="export">导出</button>
         <button type="button" class="side-btn" data-action="shuffle" aria-pressed="${shuffled}">${shuffled ? "恢复题序" : "打乱题序"}</button>
         <button type="button" class="side-btn" data-action="shuffle-options" aria-pressed="${optionShuffled}">${optionShuffled ? "恢复选项" : "打乱选项"}</button>
         <button type="button" class="side-btn" data-action="clear">清空记录</button>
         <button type="button" class="side-btn wide" data-action="delete">删除本题库</button>
+      </div>
+      <div class="filter-row">
+        <button type="button" class="chip" data-action="filter-all" aria-pressed="${filter === "all"}">全部</button>
+        <button type="button" class="chip" data-action="filter-wrong" aria-pressed="${filter === "wrong"}">错题</button>
+        <button type="button" class="chip" data-action="filter-star" aria-pressed="${filter === "star"}">收藏</button>
       </div>
       <p class="side-label">题目</p>
       <div class="qgrid">${dots}</div>`;
@@ -1885,30 +2380,55 @@ function renderSidebar(bank) {
       <button type="button" class="mode-btn" data-action="mode-practice" aria-pressed="${isPracticeMode()}">刷题模式</button>
       <button type="button" class="mode-btn" data-action="mode-exam" aria-pressed="${isExamMode()}">考试模式</button>
     </div>`;
+  const searchBox = !examActive() && isPracticeMode() && bank
+    ? `<label class="side-search"><span class="sr">搜索题目</span>
+        <input id="bankSearch" type="search" placeholder="搜索本题库" value="${esc(state.searchQuery || "")}" autocomplete="off" />
+      </label>`
+    : "";
   return `<div class="logo"><span class="logo-mark">锋</span><div><strong>${APP_SHORT}</strong><em>${isExamMode() ? "考试模式" : "刷题模式"}</em></div></div>
     ${modeSwitch}
     ${topActions}
     <p class="side-label">题库</p>
+    ${searchBox}
     <div class="bank-list">${banks || '<p class="bank-meta">还没有题库</p>'}</div>
     ${tools}
-    <p class="store-note">题库和进度保存在这台电脑上，下次打开还在。清除站点数据后需要重新导入。</p>
-    ${isPagesDemo() ? '<p class="store-note">这是网页演示。Windows 用户请下载仓库 Releases，解压后双击打开。</p>' : ""}`;
+    <p class="store-note">题库和进度保存在这台电脑上，下次打开还在。清除站点数据后需要重新导入。</p>`;
+}
+
+function renderHistory(menu) {
+  const items = state.examHistory || [];
+  const rows = items.length
+    ? items.map((item) => historyRowHtml(item)).join("")
+    : '<p class="muted">还没有考试记录。在考试模式里交卷后会出现在这里。</p>';
+  return `<div class="sheet"><div class="top">${menu}<div><h2>成绩档案</h2></div></div>
+    <article class="card empty-card">
+      <h1>考试成绩</h1>
+      <p>最近 ${items.length} 次模拟。点一条即可看卷，右键可删除。</p>
+      <div class="history-list">${rows}</div>
+      <div class="nav">
+        <button type="button" class="ghost" data-action="close-history">返回</button>
+        ${items.length ? '<button type="button" class="ghost" data-action="clear-scores">清空成绩</button>' : ""}
+      </div>
+    </article></div>`;
 }
 
 function renderStage(bank, list) {
   const menu = '<button type="button" class="menu-btn" data-action="toggle-sidebar">题库</button>';
+  if (state.panel === "history") return renderHistory(menu);
   if (!bank) {
     return `<div class="sheet"><div class="top">${menu}<div><h2>${isExamMode() ? "考试模式" : "刷题模式"}</h2></div></div>
       <article class="card empty-card"><h1>还没有题目</h1><p>导入 JSON、CSV、Markdown 或文本题库，也可以先载入一套示例题。</p>
       <div class="nav"><button type="button" class="primary" data-action="open-import">导入题库</button><button type="button" class="ghost" data-action="load-sample">载入示例</button></div></article></div>`;
   }
   if (isExamMode() && !examActive()) {
+    const recent = (state.examHistory || []).slice(0, 4).map((item) => historyRowHtml(item, true)).join("");
     return `<div class="sheet"><div class="top">${menu}<div><p class="eyebrow">${esc(bank.name)}</p></div>
       <div class="stats"><span><b>${bank.questions.length}</b>题</span></div></div>
       <article class="card empty-card">
         <h1>考试模式</h1>
-        <p>答题过程中不显示对错和解析。交卷后出分，错题会记入错题本。可选题量、时限，并打乱题序或选项。</p>
-        <div class="nav"><button type="button" class="primary" data-action="open-exam">开始考试</button><button type="button" class="ghost" data-action="mode-practice">回到刷题模式</button></div>
+        <p>答题过程中不显示对错和解析。交卷后出分，并写入成绩档案。可选题量、时限，并打乱题序或选项。</p>
+        <div class="nav"><button type="button" class="primary" data-action="open-exam">开始考试</button><button type="button" class="ghost" data-action="open-history">成绩档案</button></div>
+        ${recent ? `<p class="side-label-plain">最近成绩</p><div class="history-list">${recent}</div>` : ""}
       </article></div>`;
   }
   const stats = examActive()
@@ -1956,16 +2476,24 @@ function renderStage(bank, list) {
       : `<span><b>${stats.correct}</b>正确</span><span><b>${stats.wrong}</b>错误</span><span><b>${stats.todo}</b>未做</span>`}</div></div>
     <div class="progress-line"><div class="bar"><span style="width:${percent}%"></span></div><span>${examRunning() ? "进度" : "已做"} ${percent}%</span></div>`;
   if (!list.length) {
-    const message = stats.wrong === 0 ? "当前题库里没有答错的题目。" : "错题都已经复习过了。";
-    return `<div class="sheet">${head}<article class="card empty-card"><h1>没有错题</h1><p>${message}</p>
-      <div class="nav"><button type="button" class="primary" data-action="show-all">返回全部题目</button></div></article></div>`;
+    const filter = state.filter || "all";
+    const title = state.searchQuery ? "没有匹配的题目" : filter === "star" ? "还没有收藏" : filter === "wrong" ? "没有错题" : "没有题目";
+    const message = state.searchQuery
+      ? `当前题库里没有包含「${esc(state.searchQuery)}」的题目。`
+      : filter === "wrong"
+        ? (stats.wrong === 0 ? "当前题库里没有答错的题目。" : "错题都已经复习过了。")
+        : filter === "star"
+          ? "刷题时点「收藏」，之后可以在这里只看这些题。"
+          : "导入题库后再开始。";
+    return `<div class="sheet">${head}<article class="card empty-card"><h1>${title}</h1><p>${message}</p>
+      <div class="nav"><button type="button" class="primary" data-action="show-all">查看全部题目</button></div></article></div>`;
   }
   const question = list.find((item) => item.id === state.currentId) || list[0];
   const record = currentRecord(question);
   const index = list.findIndex((item) => item.id === question.id);
   const all = orderedQuestions(bank);
   const number = examActive() ? index + 1 : all.findIndex((item) => item.id === question.id) + 1;
-  const finished = !examActive() && stats.todo === 0 && stats.total > 0 && !state.onlyWrong
+  const finished = !examActive() && stats.todo === 0 && stats.total > 0 && state.filter === "all" && !state.searchQuery
     ? `<p class="done">这套题已经做完，正确率 ${rateOf(stats)}%。</p>`
     : "";
   const badge = question.type === "multiple" ? '<span class="badge multi">多选</span>' : '<span class="badge">单选</span>';
@@ -2026,9 +2554,14 @@ function renderStage(bank, list) {
     : examReview()
       ? "正在看卷，可查看解析 · ← → 切换题目"
       : "单击选项查看正误和解析 · 多选题按 Enter 确认 · ← → 切换题目";
+  const starOn = bank && isFlagged("star", bank.id, question.id);
+  const flagBar = examRunning() ? "" : `<div class="flag-bar">
+      <button type="button" class="flag-btn" data-action="toggle-star" aria-pressed="${starOn}">${starOn ? "已收藏" : "收藏"}</button>
+    </div>`;
   return `<div class="sheet">${head}${finished}<article class="card">
-    <div class="meta">${badge}${state.onlyWrong && !examActive() ? '<span class="badge multi">错题</span>' : ""}${examRunning() ? '<span class="badge exam">考试</span>' : ""}<span class="count">第 ${number} 题 · ${index + 1} / ${list.length}</span></div>
+    <div class="meta">${badge}${state.filter === "wrong" && !examActive() ? '<span class="badge multi">错题</span>' : ""}${starOn ? '<span class="badge star">收藏</span>' : ""}${examRunning() ? '<span class="badge exam">考试</span>' : ""}<span class="count">第 ${number} 题 · ${index + 1} / ${list.length}</span></div>
     <div class="stem">${formatRich(question.stem)}</div>
+    ${flagBar}
     ${hint}
     <div class="options">${options}</div>
     ${verdict}
@@ -2043,6 +2576,7 @@ function renderStage(bank, list) {
 }
 
 function onClick(event) {
+  if (!event.target.closest("#ctxMenu")) hideCtxMenu();
   const node = event.target.closest("[data-action]");
   if (!node || node.disabled) return;
   const action = node.dataset.action;
@@ -2057,9 +2591,36 @@ function onClick(event) {
     if (!confirmLeaveExam()) return;
     openImport();
   }
-  else if (action === "open-exam") openExamDialog();
+  else if (action === "open-exam") {
+    state.panel = null;
+    openExamDialog();
+  }
   else if (action === "mode-practice") setUiMode("practice");
   else if (action === "mode-exam") setUiMode("exam");
+  else if (action === "open-history") openHistory();
+  else if (action === "close-history") {
+    state.panel = null;
+    save();
+    render({ toTop: true });
+  }
+  else if (action === "open-archive") openArchivedExam(node.dataset.id);
+  else if (action === "clear-scores") clearScores();
+  else if (action === "toggle-star") {
+    const bank = getBank();
+    const question = currentQuestion();
+    if (!bank || !question || examRunning()) return;
+    toggleFlag("star", bank.id, question.id);
+    save();
+    render();
+  }
+  else if (action === "filter-all") {
+    state.filter = "all";
+    state.pinId = null;
+    save();
+    render({ toTop: true });
+  }
+  else if (action === "filter-wrong") setFilter("wrong");
+  else if (action === "filter-star") setFilter("star");
   else if (action === "submit-exam") submitExam(false);
   else if (action === "exit-exam") exitExam();
   else if (action === "open-api") openApiSettings();
@@ -2070,19 +2631,22 @@ function onClick(event) {
   else if (action === "api-preset") applyApiPreset(node.dataset.base, node.dataset.model);
   else if (action === "load-sample") loadSample();
   else if (action === "toggle-wrong" || action === "show-all") {
-    if (action === "show-all") state.onlyWrong = true;
-    toggleWrong();
+    state.filter = "all";
+    state.pinId = null;
+    save();
+    render({ toTop: true });
   } else if (action === "shuffle") shuffleQuestions();
   else if (action === "shuffle-options") shuffleOptions();
   else if (action === "clear") clearProgress();
   else if (action === "delete") deleteBank();
-  else if (action === "export") exportBank();
+  else if (action === "export") openExportDialog();
   else if (action === "toggle-sidebar") toggleSidebar();
 }
 
 function onKey(event) {
+  if (event.key === "Escape") hideCtxMenu();
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  if ($("importDialog").open || $("apiDialog").open || $("examDialog")?.open) return;
+  if ($("importDialog").open || $("apiDialog").open || $("examDialog")?.open || $("exportDialog")?.open) return;
   if (event.target.closest("textarea, input")) return;
   const question = currentQuestion();
   if (!question) return;
@@ -2120,6 +2684,27 @@ function onKey(event) {
 function bind() {
   document.body.addEventListener("click", onClick);
   document.addEventListener("keydown", onKey);
+  document.addEventListener("contextmenu", (event) => {
+    const item = event.target.closest(".history-item");
+    if (!item) {
+      hideCtxMenu();
+      return;
+    }
+    showScoreCtxMenu(event, item);
+  });
+  $("ctxMenu").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-ctx]");
+    if (!btn || btn.disabled) return;
+    event.stopPropagation();
+    const id = ctxScoreId;
+    const action = btn.dataset.ctx;
+    hideCtxMenu();
+    if (!id) return;
+    if (action === "open") openArchivedExam(id);
+    else if (action === "delete") deleteScore(id);
+  });
+  window.addEventListener("resize", hideCtxMenu);
+  window.addEventListener("scroll", hideCtxMenu, true);
   $("scrim").addEventListener("click", closeSidebar);
   $("fillSample").addEventListener("click", () => {
     $("pasteArea").value = TEXT_SAMPLE;
@@ -2130,6 +2715,30 @@ function bind() {
   $("doExam").addEventListener("click", (event) => {
     event.preventDefault();
     startExamFromForm();
+  });
+  $("doExport").addEventListener("click", (event) => {
+    event.preventDefault();
+    confirmExport();
+  });
+  $("exportPresetAll").addEventListener("change", () => {
+    const on = $("exportPresetAll").checked;
+    $("exportIncludeBanks").checked = on;
+    $("exportRecords").checked = on;
+    $("exportHistory").checked = on;
+    $("exportFlags").checked = on;
+    const allScope = document.querySelector('input[name="exportScope"][value="all"]');
+    if (on && allScope) allScope.checked = true;
+  });
+  for (const id of ["exportIncludeBanks", "exportRecords", "exportHistory", "exportFlags"]) {
+    $(id).addEventListener("change", syncExportPreset);
+  }
+  document.querySelectorAll('input[name="exportScope"]').forEach((node) => {
+    node.addEventListener("change", syncExportPreset);
+  });
+  document.body.addEventListener("input", (event) => {
+    if (event.target.id !== "bankSearch") return;
+    state.searchQuery = event.target.value;
+    render({ keepSearch: true, searchPos: event.target.selectionStart });
   });
   $("clearApi").addEventListener("click", () => {
     $("apiKeyInput").value = "";
@@ -2194,16 +2803,8 @@ function bind() {
   });
 }
 
-function isLocalServer() {
-  return location.protocol !== "file:" && location.hostname === "127.0.0.1";
-}
-
-function isPagesDemo() {
-  return /\.github\.io$/i.test(location.hostname);
-}
-
 function watchWindow() {
-  if (!isLocalServer()) return;
+  if (location.protocol === "file:") return;
   const ping = () => {
     fetch("/__alive", { method: "POST", cache: "no-store", keepalive: true }).catch(() => {});
   };
@@ -2347,12 +2948,37 @@ D. 4
   assert(mdPack.questions[1].options[3].text.includes("!"), "行内答案剥离后选项仍在");
   assert(mdPack.questions[2].type === "multiple" && mdPack.questions[2].answer.join("") === "BD", "Markdown 多选");
 
+  const fs = require("fs");
+  const java1Path = fs.existsSync("java1.md") ? "java1.md" : "题库/java1.md";
+  const java2Path = fs.existsSync("java2.md") ? "java2.md" : "题库/java2.md";
+  if (fs.existsSync(java1Path)) {
+    const java1 = parseImport(fs.readFileSync(java1Path, "utf8"), "java1.md")[0];
+    assert(java1.questions.length >= 90, "java1 应识别出大部分题目，实际 " + java1.questions.length);
+    assert(java1.questions[0].answer.join("") === "B", "java1 第 1 题");
+  }
+  if (fs.existsSync(java2Path)) {
+    const java2 = parseImport(fs.readFileSync(java2Path, "utf8"), "java2.md")[0];
+    assert(java2.questions.length === 100, "java2 应为 100 题，实际 " + java2.questions.length);
+    assert(java2.questions[0].answer.join("") === "B", "java2 第 1 题");
+    assert(java2.questions[5].answer.join("") === "B", "java2 行内答案第 6 题");
+    assert(java2.questions[5].options.length === 4, "java2 第 6 题四个选项");
+  }
+
   const inline = formatRich("shell command `echo $?` and `<tag>`");
   assert(inline.includes('class="icode"') && inline.includes("echo $?") && inline.includes("&lt;tag&gt;"), "行内代码");
   assert(!inline.includes("`"), "反引号不原样显示");
   const block = formatRich("Read syscall:\n    .data\n    buf: .space 4\n    li a0, 0\nWhich statement?");
   assert(block.includes('class="codeblock"') && block.includes("asm") && block.includes("tok-dir") && block.includes("tok-op") && block.includes("tok-reg"), "汇编代码块");
   assert(block.includes("Which statement?"), "代码块前后的题干保留");
+  if (fs.existsSync("RISC-V-Assembly-100.json")) {
+    const riscv = JSON.parse(fs.readFileSync("RISC-V-Assembly-100.json", "utf8"));
+    const q94 = riscv.questions.find((item) => item.question.includes("[Hard] 94"));
+    const q40 = riscv.questions.find((item) => item.question.includes("echo $?"));
+    const q86 = riscv.questions.find((item) => item.question.includes("[Hard] 86"));
+    assert(formatRich(q94.question).includes("codeblock") && formatRich(q94.question).includes("ecall"), "第94题代码块");
+    assert(formatRich(q40.question).includes("icode"), "第40题行内代码");
+    assert(formatRich(q86.options[0]).includes("icode"), "第86题选项行内代码");
+  }
 
   state = fresh();
   state.banks = [{ name: "计算机基础" }];
@@ -2418,6 +3044,47 @@ D. 4
   assert(state.uiMode === "practice" && isPracticeMode() && !isExamMode(), "默认刷题模式");
   state.uiMode = "exam";
   assert(isExamMode() && !isPracticeMode(), "可切换考试模式");
+
+  const quizQ = {
+    id: "q1",
+    stem: "JVM 是什么",
+    options: [{ key: "A", text: "编译器" }, { key: "B", text: "虚拟机" }],
+    answer: ["B"],
+    explanation: "执行字节码",
+    type: "single",
+  };
+  assert(matchesSearch(quizQ, "虚拟") && !matchesSearch(quizQ, "数据库"), "搜索题干和选项");
+  state = fresh();
+  state.banks = [{ id: "b1", name: "测", questions: [quizQ] }];
+  state.activeBankId = "b1";
+  toggleFlag("star", "b1", "q1");
+  assert(isFlagged("star", "b1", "q1"), "收藏标记");
+  state.filter = "star";
+  assert(visibleQuestions().length === 1 && visibleQuestions()[0].id === "q1", "收藏筛选");
+  state.filter = "all";
+  state.searchQuery = "编译";
+  assert(visibleQuestions().length === 1, "搜索命中选项");
+  state.searchQuery = "";
+  const backup = buildExportPayload({ scope: "current", banks: true, records: true, history: true, flags: true });
+  assert(backup.data.kind === BACKUP_KIND, "备份格式");
+  assert(backup.data.banks[0].questions[0].id === "q1", "备份保留题目 id");
+  assert(backup.data.flags.star.b1.q1 === true, "备份包含收藏");
+  const classic = buildExportPayload({ scope: "current", banks: true, records: false, history: false, flags: false });
+  assert(classic.data.questions[0].question === "JVM 是什么", "普通导出仍是公开格式");
+  let emptyExport = false;
+  try {
+    buildExportPayload({ scope: "current", banks: false, records: false, history: false, flags: false });
+  } catch (err) {
+    emptyExport = String(err.message || "").includes("至少");
+  }
+  assert(emptyExport, "导出至少选一项");
+  const restored = hydrateBank(backup.data.banks[0]);
+  assert(restored.id === "b1" && restored.questions[0].id === "q1", "备份还原保留 id");
+  state.exam = { startedAt: 1, auto: false, ids: ["q1"], answers: { q1: ["B"] }, optionOrder: {} };
+  archiveExam(state.banks[0], { records: { q1: { picks: ["B"], correct: true } }, correct: 1, wrong: 0, blank: 0, total: 1 });
+  assert(state.examHistory.length === 1 && state.examHistory[0].score === 100, "交卷写入成绩档案");
+  const archivedId = state.examHistory[0].id;
+  assert(removeExamScore(archivedId) && state.examHistory.length === 0, "删除成绩");
   console.log("parser tests ok");
 }
 

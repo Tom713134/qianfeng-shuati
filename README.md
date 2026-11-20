@@ -1,7 +1,7 @@
 <h1 align="center">前锋刷题软件 / Qianfeng Shuati</h1>
 
 <p align="center">
-  解压即用的 Windows 选择题练习。侧边栏切换<strong>刷题</strong>或<strong>考试</strong>，导入 Markdown / JSON，错题本，可打乱选项。<br>
+  解压即用的 Windows 选择题练习。侧边栏切换<strong>刷题</strong>或<strong>考试</strong>，导入 Markdown / JSON，搜索、收藏、成绩档案，可备份进度。<br>
   不用注册，数据只在你的电脑上。
 </p>
 
@@ -29,11 +29,12 @@
 
 ## 功能
 
-- **刷题模式**：点选项立刻显示对错和解析；可「只看错题」
-- **考试模式**：答题中不显示对错；可选题量、时限、打乱题序/选项；交卷后出分，错题记入错题本
-- 导入 JSON、Markdown、CSV、纯文本试卷
-- 单选 / 多选
+- **刷题模式**：点选项立刻显示对错和解析；可搜索本题库，按错题或收藏筛选
+- **考试模式**：答题中不显示对错；可选题量、时限、打乱题序/选项；交卷后出分，写入成绩档案，可回看；右键可删除成绩
+- 导入 JSON、Markdown、CSV、纯文本试卷，也可导入本软件的备份文件
+- 单选 / 多选；题目可收藏
 - 打乱题序、打乱选项（解析会跟当前选项对齐）
+- 导出时可选择内容（题库 / 记录 / 成绩 / 收藏）和保存位置
 - 进度保存在本机，下次打开还在
 - 可选：填自己的 API Key（DeepSeek / OpenAI / Ollama）生成解析
 
@@ -67,8 +68,8 @@
 
 | 模式 | 做什么 |
 | --- | --- |
-| 刷题 | 即时对错和解析，适合日常过题、复习错题 |
-| 考试 | 先选题量和时限再开考；过程中看不到答案，交卷后出分 |
+| 刷题 | 即时对错和解析，适合日常过题；可搜索、只看错题或收藏 |
+| 考试 | 先选题量和时限再开考；过程中看不到答案，交卷后出分并写入成绩档案 |
 
 考试进行中不能改模式。交卷或看完卷后，可回到刷题。
 
@@ -97,7 +98,7 @@
 
 若本机以前用过旧版「刷题」，第一次打开会自动沿用原来的进度。
 
-换电脑时先在软件里「导出题库」。进度目前跟这台电脑绑定。
+换电脑时在软件里点「导出」，勾选完整备份后再导入到新电脑。
 
 ## 开发
 
@@ -123,7 +124,7 @@ GitHub Pages 由 `.github/workflows/pages.yml` 在推送到 `main` 后发布。�
 
 <h2 id="english">English</h2>
 
-**Qianfeng Shuati** is a portable Windows quiz app for multiple-choice practice. Switch between **practice** (instant feedback) and **exam** (optional timer, score after submit). Import JSON / Markdown / CSV / text, review missed questions, optionally shuffle stems and options. Progress stays on this computer. No account.
+**Qianfeng Shuati** is a portable Windows quiz app for multiple-choice practice. Switch between **practice** (instant feedback, search, favorites) and **exam** (optional timer, score archive after submit). Import JSON / Markdown / CSV / text, export a backup, review missed questions, optionally shuffle stems and options. Progress stays on this computer. No account.
 
 <p align="center">
   <img src="docs/screenshots/quiz.png" alt="Qianfeng Shuati quiz screen" width="920" />
